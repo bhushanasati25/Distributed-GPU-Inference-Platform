@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "distributed-gpu-inference"
+version = "1.0.0"
+description = "Distributed GPU Inference Platform Model & Data Pipeline"
+authors = [{ name = "Platform Engineering", email = "platform-eng@example.com" }]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["python/tests"]
+asyncio_mode = "auto"
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.isort]
+profile = "black"
+line_length = 100

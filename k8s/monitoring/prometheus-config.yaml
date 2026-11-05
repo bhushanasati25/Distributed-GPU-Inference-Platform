@@ -1,0 +1,244 @@
+# =============================================================================
+# Prometheus Configuration ConfigMap
+# =============================================================================
+# Contains the full prometheus.yml configuration with scrape targets for:
+#   - Triton Inference Server metrics (port 8002)
+#   - Inference Router metrics (port 9090)
+#   - NVIDIA DCGM Exporter GPU metrics (port 9400)
+#   - Node Exporter system metrics (port 9100)
+#   - kube-state-metrics Kubernetes object metrics (port 8080)
+# Uses Kubernetes service discovery with relabeling rules.
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+  labels:
+    app: distributed-gpu-inference
+    component: prometheus
+  annotations:
+    description: "Prometheus server configuration with inference platform scrape targets"
+data:
+  prometheus.yml: |
+    # ==========================================================================
+    # Prometheus Configuration for Distributed GPU Inference Platform
+    # ==========================================================================
+
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      scrape_timeout: 10s
+      external_labels:
+        cluster: gpu-inference-cluster
+        environment: production
+
+    # Load alerting rules from files
+    rule_files:
+      - /etc/prometheus/rules/*.yaml
+
+    # Alertmanager configuration
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets:
+                - alertmanager.monitoring.svc.cluster.local:9093
+
+    # ==========================================================================
+    # Scrape Configurations
+    # ==========================================================================
+    scrape_configs:
+
+      # -----------------------------------------------------------------------
+      # 1. Triton Inference Server Metrics
+      # -----------------------------------------------------------------------
+      # Scrapes Triton's built-in Prometheus metrics endpoint (/metrics on :8002)
+      # Metrics include: inference counts, latencies, queue times, model stats
+      - job_name: triton-inference-server
+        scrape_interval: 15s
+        metrics_path: /metrics
+
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+                - inference
+
+        relabel_configs:
+          # Only scrape endpoints with component=triton label
+          - source_labels: [__meta_kubernetes_service_label_component]
+            action: keep
+            regex: triton
+          # Only scrape the metrics port (8002)
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: metrics
+          # Set the instance label to the pod name for clarity
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: instance
+          # Carry over the pod's node name
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+          # Set a descriptive job label
+          - target_label: __metrics_path__
+            replacement: /metrics
+
+      # -----------------------------------------------------------------------
+      # 2. Inference Router Metrics
+      # -----------------------------------------------------------------------
+      # Scrapes router Prometheus metrics: queue depth, routing latency,
+      # backend health, request counts, connection pool utilization
+      - job_name: inference-router
+        scrape_interval: 15s
+        metrics_path: /metrics
+
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+                - inference
+
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_label_component]
+            action: keep
+            regex: router
+          - source_labels: [__meta_kubernetes_service_label_monitoring]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: metrics
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: instance
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+
+      # -----------------------------------------------------------------------
+      # 3. NVIDIA DCGM Exporter (GPU Metrics)
+      # -----------------------------------------------------------------------
+      # Scrapes GPU utilization, memory usage, temperature, power, ECC errors
+      # from the DCGM exporter DaemonSet running on GPU nodes
+      - job_name: dcgm-exporter
+        scrape_interval: 15s
+        metrics_path: /metrics
+
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+                - monitoring
+
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_label_component]
+            action: keep
+            regex: dcgm-exporter
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: metrics
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: instance
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+          # Extract GPU UUID from pod annotations if available
+          - source_labels: [__meta_kubernetes_pod_annotation_gpu_uuid]
+            target_label: gpu_uuid
+            regex: (.+)
+
+      # -----------------------------------------------------------------------
+      # 4. Node Exporter (System Metrics)
+      # -----------------------------------------------------------------------
+      # Scrapes host-level metrics: CPU, memory, disk, network from each node
+      - job_name: node-exporter
+        scrape_interval: 15s
+        metrics_path: /metrics
+
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+                - monitoring
+
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_label_component]
+            action: keep
+            regex: node-exporter
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: metrics
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: instance
+
+      # -----------------------------------------------------------------------
+      # 5. kube-state-metrics (Kubernetes Object Metrics)
+      # -----------------------------------------------------------------------
+      # Scrapes Kubernetes object state: deployments, pods, nodes, PVCs, etc.
+      - job_name: kube-state-metrics
+        scrape_interval: 15s
+        metrics_path: /metrics
+
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+                - monitoring
+
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_label_component]
+            action: keep
+            regex: kube-state-metrics
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: http-metrics
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: instance
+
+      # -----------------------------------------------------------------------
+      # 6. Prometheus Self-Monitoring
+      # -----------------------------------------------------------------------
+      - job_name: prometheus
+        scrape_interval: 15s
+        static_configs:
+          - targets:
+              - localhost:9090
+
+      # -----------------------------------------------------------------------
+      # 7. MinIO Metrics
+      # -----------------------------------------------------------------------
+      - job_name: minio
+        scrape_interval: 30s
+        metrics_path: /minio/v2/metrics/cluster
+
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+                - data
+
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_label_component]
+            action: keep
+            regex: minio
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: api
+
+      # -----------------------------------------------------------------------
+      # 8. Redis Exporter Metrics
+      # -----------------------------------------------------------------------
+      - job_name: redis
+        scrape_interval: 15s
+
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+                - data
+
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_label_component]
+            action: keep
+            regex: redis
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: metrics

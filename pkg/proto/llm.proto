@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package llm;
+
+option go_package = "github.com/distributed-gpu-inference/platform/pkg/proto/llm";
+
+// LLMInferenceService provides generative AI completion and continuous batching streaming.
+service LLMInferenceService {
+  // Generate completes a prompt synchronously and returns full generation.
+  rpc Generate(GenerateRequest) returns (GenerateResponse);
+
+  // GenerateStream streams tokens sequentially as they are decoded by the GPU.
+  rpc GenerateStream(GenerateRequest) returns (stream GenerateResponse);
+}
+
+message GenerateRequest {
+  string model_name = 1;
+  string prompt = 2;
+  int32 max_tokens = 3;
+  float temperature = 4;
+  float top_p = 5;
+  repeated string stop_sequences = 6;
+  int32 priority = 7;
+}
+
+message GenerateResponse {
+  string text_chunk = 1;
+  bool is_finished = 2;
+  string finish_reason = 3; // "length", "stop", or "timeout"
+  int32 tokens_generated = 4;
+  float latency_ms = 5;
+}
+

@@ -1,0 +1,40 @@
+# =============================================================================
+# KEDA ScaledObject: Triton GPU StatefulSet
+# =============================================================================
+# Scales Triton GPU server pods based on NVIDIA DCGM hardware metrics and
+# Triton model execution queue latencies.
+# =============================================================================
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: triton-gpu-scaler
+  namespace: inference
+  labels:
+    app: distributed-gpu-inference
+    component: triton
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: triton-inference-server
+  minReplicaCount: 4  # Minimum 1 replica per node pool
+  maxReplicaCount: 16 # Up to 4 per node pool under surge
+  cooldownPeriod: 300 # 5 min cooldown to prevent GPU churn
+  pollingInterval: 15
+  triggers:
+    # Trigger 1: GPU Core Utilization from DCGM Exporter
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus-service.monitoring.svc.cluster.local:9090
+        metricName: avg_gpu_utilization
+        threshold: "80" # Scale up when average GPU core utilization exceeds 80%
+        query: avg(DCGM_FI_DEV_GPU_UTIL{modelName=~".*"} or DCGM_FI_DEV_GPU_UTIL)
+
+    # Trigger 2: Triton Server Queue Wait Latency
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus-service.monitoring.svc.cluster.local:9090
+        metricName: triton_queue_wait_us
+        threshold: "5000" # Scale up when queue wait exceeds 5,000 microseconds (5ms)
+        query: avg(rate(nv_inference_queue_duration_us[1m]) / rate(nv_inference_request_success[1m]))
+

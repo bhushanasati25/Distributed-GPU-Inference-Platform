@@ -1,0 +1,187 @@
+# =============================================================================
+# Inference Router Deployment
+# =============================================================================
+# The inference router is the front-door for all inference requests. It
+# implements intelligent request routing, load balancing (least-loaded,
+# round-robin, latency-aware), queue management, and health-based backend
+# selection. Three replicas provide high availability.
+# =============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-router
+  namespace: inference
+  labels:
+    app: distributed-gpu-inference
+    component: router
+    tier: frontend
+  annotations:
+    description: "Intelligent inference request router with gRPC and HTTP endpoints"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: distributed-gpu-inference
+      component: router
+  # Rolling update: at most 1 pod unavailable during deploy
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: distributed-gpu-inference
+        component: router
+        tier: frontend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: inference-router
+      terminationGracePeriodSeconds: 30
+
+      # Prefer spreading router pods across nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: component
+                      operator: In
+                      values:
+                        - router
+                topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: router
+          image: distributed-gpu-inference/router:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: grpc
+              containerPort: 50051
+              protocol: TCP
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+
+          env:
+            # Router configuration via ConfigMap
+            - name: ROUTER_CONFIG_PATH
+              value: /etc/router/config.yaml
+            # Log level from ConfigMap
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: router-config
+                  key: log_level
+            # Triton backend addresses from ConfigMap
+            - name: TRITON_BACKENDS
+              valueFrom:
+                configMapKeyRef:
+                  name: router-config
+                  key: triton_backends
+            # Redis connection for caching and state
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: router-secrets
+                  key: redis_url
+            # MinIO credentials for model metadata
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: router-secrets
+                  key: minio_access_key
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: router-secrets
+                  key: minio_secret_key
+            # Pod identity for distributed coordination
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+
+          # Readiness: router is ready to accept traffic
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+            successThreshold: 1
+
+          # Liveness: router process is alive
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+            successThreshold: 1
+
+          volumeMounts:
+            - name: router-config
+              mountPath: /etc/router
+              readOnly: true
+
+      volumes:
+        - name: router-config
+          configMap:
+            name: router-config
+---
+# ServiceAccount for the router
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: inference-router
+  namespace: inference
+  labels:
+    app: distributed-gpu-inference
+    component: router
+---
+# Secret placeholder for router credentials
+# NOTE: In production, use a secrets manager (e.g., Vault, Sealed Secrets)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: router-secrets
+  namespace: inference
+  labels:
+    app: distributed-gpu-inference
+    component: router
+type: Opaque
+data:
+  # redis://redis.data.svc.cluster.local:6379
+  redis_url: cmVkaXM6Ly9yZWRpcy5kYXRhLnN2Yy5jbHVzdGVyLmxvY2FsOjYzNzk=
+  # minioadmin
+  minio_access_key: bWluaW9hZG1pbg==
+  # minioadmin123
+  minio_secret_key: bWluaW9hZG1pbjEyMw==

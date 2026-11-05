@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "distributed-gpu-inference.fullname" . }}-router
+  labels:
+    {{- include "distributed-gpu-inference.labels" . | nindent 4 }}
+    component: router
+spec:
+  replicas: {{ .Values.router.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "distributed-gpu-inference.name" . }}
+      component: router
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "distributed-gpu-inference.name" . }}
+        component: router
+    spec:
+      containers:
+        - name: router
+          image: "{{ .Values.router.image.repository }}:{{ .Values.router.image.tag }}"
+          imagePullPolicy: {{ .Values.router.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.router.service.grpcPort }}
+              name: grpc
+            - containerPort: {{ .Values.router.service.httpPort }}
+              name: http
+            - containerPort: {{ .Values.router.service.metricsPort }}
+              name: metrics
+          resources:
+            {{- toYaml .Values.router.resources | nindent 12 }}
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: config-volume
+          configMap:
+            name: {{ include "distributed-gpu-inference.fullname" . }}-config
+

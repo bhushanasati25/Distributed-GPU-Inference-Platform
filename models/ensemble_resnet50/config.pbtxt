@@ -1,0 +1,54 @@
+# =============================================================================
+# Triton Ensemble Pipeline: Preprocess + TensorRT ResNet50
+# =============================================================================
+name: "ensemble_resnet50"
+platform: "ensemble"
+max_batch_size: 64
+
+input [
+  {
+    name: "RAW_IMAGE"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+]
+
+output [
+  {
+    name: "PROBABILITIES"
+    data_type: TYPE_FP32
+    dims: [ 1000 ]
+  }
+]
+
+ensemble_scheduling {
+  step [
+    # Step 1: Decode & Normalize Raw Image
+    {
+      model_name: "image_preprocess"
+      model_version: -1
+      input_map {
+        key: "raw_image_bytes"
+        value: "RAW_IMAGE"
+      }
+      output_map {
+        key: "preprocessed_tensor"
+        value: "PREPROCESSED_TENSOR"
+      }
+    },
+    # Step 2: High-speed TensorRT Model Execution
+    {
+      model_name: "resnet50"
+      model_version: -1
+      input_map {
+        key: "input_0"
+        value: "PREPROCESSED_TENSOR"
+      }
+      output_map {
+        key: "output_0"
+        value: "PROBABILITIES"
+      }
+    }
+  ]
+}
+

@@ -1,0 +1,55 @@
+# =============================================================================
+# GPU Resource Quota and Limit Range for Inference Namespace
+# =============================================================================
+# ResourceQuota caps the total number of GPUs consumable in the inference
+# namespace to prevent runaway scheduling. LimitRange sets default GPU
+# requests per pod so that pods without explicit GPU requests are handled.
+# =============================================================================
+
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: gpu-resource-quota
+  namespace: inference
+  labels:
+    app: distributed-gpu-inference
+    component: quota
+  annotations:
+    description: "Caps total GPU allocation in the inference namespace to 8 GPUs"
+spec:
+  hard:
+    # Maximum total GPU requests across all pods in this namespace
+    requests.nvidia.com/gpu: "8"
+    # Maximum total GPU limits across all pods in this namespace
+    limits.nvidia.com/gpu: "8"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: gpu-limit-range
+  namespace: inference
+  labels:
+    app: distributed-gpu-inference
+    component: quota
+  annotations:
+    description: "Default and maximum resource limits for pods in the inference namespace"
+spec:
+  limits:
+    # Default resource requests/limits applied to containers that don't specify their own
+    - type: Container
+      default:
+        cpu: "2"
+        memory: 8Gi
+      defaultRequest:
+        cpu: "1"
+        memory: 4Gi
+      max:
+        cpu: "8"
+        memory: 32Gi
+        nvidia.com/gpu: "1"
+    # Pod-level limits to cap total resources per pod
+    - type: Pod
+      max:
+        cpu: "16"
+        memory: 64Gi
+        nvidia.com/gpu: "1"

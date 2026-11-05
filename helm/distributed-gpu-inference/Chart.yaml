@@ -1,0 +1,18 @@
+apiVersion: v2
+name: distributed-gpu-inference
+description: Production Helm chart for Distributed GPU Inference Platform across multi-pool GPU Kubernetes clusters
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - machine-learning
+  - inference
+  - triton
+  - tensorrt
+  - kubernetes
+  - gpu
+  - go
+maintainers:
+  - name: Platform Engineering Team
+    email: platform-eng@example.com
+

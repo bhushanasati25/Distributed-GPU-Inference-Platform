@@ -1,0 +1,70 @@
+# =============================================================================
+# Inference Router HorizontalPodAutoscaler
+# =============================================================================
+# Autoscales the inference router between 3 and 10 replicas based on:
+#   1. CPU utilization target of 70%
+#   2. Custom metric: router_queue_depth average value < 500
+# Requires the metrics-server and a custom metrics adapter (e.g.,
+# prometheus-adapter) to be installed in the cluster.
+# =============================================================================
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: inference-router-hpa
+  namespace: inference
+  labels:
+    app: distributed-gpu-inference
+    component: router
+  annotations:
+    description: "Autoscale router based on CPU and queue depth"
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: inference-router
+  minReplicas: 3
+  maxReplicas: 10
+
+  metrics:
+    # Scale based on average CPU utilization across all router pods
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+    # Scale based on custom router_queue_depth metric from Prometheus
+    # Requires prometheus-adapter with the following rule configured:
+    #   seriesQuery: 'router_queue_depth{namespace="inference"}'
+    #   metricsQuery: 'avg(router_queue_depth{<<.LabelMatchers>>})'
+    - type: Pods
+      pods:
+        metric:
+          name: router_queue_depth
+        target:
+          type: AverageValue
+          averageValue: "500"
+
+  behavior:
+    # Scale up aggressively to handle traffic spikes
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+      selectPolicy: Max
+
+    # Scale down conservatively to avoid flapping
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+      selectPolicy: Min

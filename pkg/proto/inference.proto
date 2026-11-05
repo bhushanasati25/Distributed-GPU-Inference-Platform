@@ -1,0 +1,155 @@
+syntax = "proto3";
+
+package inference;
+
+option go_package = "github.com/distributed-gpu-inference/platform/pkg/proto/inference";
+
+// InferenceService provides model inference, status queries, and health checks
+// for the distributed GPU inference platform. It acts as the public API surface
+// that clients use to submit prediction requests and monitor model readiness.
+service InferenceService {
+  // Predict submits an inference request for a specified model and returns
+  // the computed output tensors. The router selects an optimal backend GPU
+  // node based on load, latency, and data-locality heuristics.
+  rpc Predict(InferenceRequest) returns (InferenceResponse);
+
+  // ModelStatus returns the deployment status and metadata for a model,
+  // including whether it is loaded, its version, and resource utilisation.
+  rpc ModelStatus(ModelStatusRequest) returns (ModelStatusResponse);
+
+  // Health performs a lightweight liveness/readiness probe suitable for
+  // Kubernetes health-check endpoints and load-balancer probes.
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+// InferenceRequest carries a single prediction payload destined for a named
+// model version. Callers specify input tensors, a priority level for queue
+// ordering, and an optional deadline in milliseconds after which the request
+// may be dropped.
+message InferenceRequest {
+  // Name of the model to invoke (e.g. "resnet50", "llama2-70b").
+  string model_name = 1;
+
+  // Semantic version string of the model (e.g. "1", "2"). Empty means latest.
+  string model_version = 2;
+
+  // Ordered list of input tensors whose names must match the model signature.
+  repeated TensorData inputs = 3;
+
+  // Scheduling priority: higher values are served first. 0 is default.
+  int32 priority = 4;
+
+  // Maximum wall-clock time (ms) the caller is willing to wait. 0 = no limit.
+  int64 deadline_ms = 5;
+
+  // Opaque request identifier for tracing and correlation.
+  string request_id = 6;
+}
+
+// InferenceResponse wraps the output tensors produced by a model invocation
+// together with latency telemetry for the caller.
+message InferenceResponse {
+  // Computed output tensors in the order defined by the model signature.
+  repeated TensorData outputs = 1;
+
+  // Name of the model that produced this response.
+  string model_name = 2;
+
+  // Version of the model that produced this response.
+  string model_version = 3;
+
+  // Server-side inference latency in milliseconds (excludes network transit).
+  float latency_ms = 4;
+
+  // Opaque request identifier echoed back for correlation.
+  string request_id = 5;
+}
+
+// TensorData is the wire representation of a single named tensor. It uses a
+// flat byte buffer (raw_data) for maximum serialization efficiency; the shape
+// and datatype fields let the receiver reconstruct the multi-dimensional array.
+message TensorData {
+  // Tensor name as declared in the model signature.
+  string name = 1;
+
+  // Element datatype string following the ONNX/Triton convention:
+  // "FP32", "FP16", "INT32", "INT64", "BYTES", etc.
+  string datatype = 2;
+
+  // Dimension sizes in row-major order (e.g. [1, 3, 224, 224]).
+  repeated int64 shape = 3;
+
+  // Raw tensor payload as a contiguous byte buffer in little-endian format.
+  bytes raw_data = 4;
+}
+
+// ModelStatusRequest asks for the current status of a specific model version.
+message ModelStatusRequest {
+  // Name of the model to query.
+  string model_name = 1;
+
+  // Version to query. Empty means latest or all versions.
+  string model_version = 2;
+}
+
+// ModelState enumerates the lifecycle states a model can be in.
+enum ModelState {
+  MODEL_STATE_UNKNOWN = 0;
+  MODEL_STATE_READY = 1;
+  MODEL_STATE_LOADING = 2;
+  MODEL_STATE_UNLOADING = 3;
+  MODEL_STATE_UNAVAILABLE = 4;
+}
+
+// ModelStatusResponse carries the deployment state and resource usage for a
+// model across all backends in the cluster.
+message ModelStatusResponse {
+  // Model name echoed back.
+  string model_name = 1;
+
+  // Model version echoed back.
+  string model_version = 2;
+
+  // Aggregate state of the model (READY if at least one backend is ready).
+  ModelState state = 3;
+
+  // Per-backend readiness reports.
+  repeated BackendModelStatus backends = 4;
+}
+
+// BackendModelStatus reports model readiness on a single backend node.
+message BackendModelStatus {
+  // Backend address (host:port).
+  string backend_address = 1;
+
+  // State of the model on this backend.
+  ModelState state = 2;
+
+  // Human-readable reason if state is not READY.
+  string reason = 3;
+}
+
+// HealthRequest is an empty probe message.
+message HealthRequest {}
+
+// HealthResponse reports overall router health plus per-backend status.
+message HealthResponse {
+  // Overall service status.
+  ServingStatus status = 1;
+
+  // Number of backends currently marked healthy.
+  int32 healthy_backends = 2;
+
+  // Total number of registered backends.
+  int32 total_backends = 3;
+
+  // Optional human-readable status message.
+  string message = 4;
+}
+
+// ServingStatus indicates the overall readiness of the inference router.
+enum ServingStatus {
+  UNKNOWN = 0;
+  SERVING = 1;
+  NOT_SERVING = 2;
+}

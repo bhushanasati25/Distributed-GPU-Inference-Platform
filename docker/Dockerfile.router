@@ -1,0 +1,39 @@
+# Build Stage
+FROM golang:1.21-alpine AS builder
+
+WORKDIR /build
+
+# Install git and build essentials
+RUN apk add --no-cache git ca-certificates
+
+# Copy go mod and dependencies
+COPY go.mod go.sum* ./
+RUN go mod download || true
+
+# Copy source code
+COPY . .
+
+# Compile statically linked binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s" \
+    -o /bin/inference-router \
+    cmd/router/main.go
+
+# Runtime Stage
+FROM gcr.io/distroless/static:nonroot
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /bin/inference-router /app/inference-router
+COPY config.yaml /app/config.yaml
+
+# Run as non-root
+USER 65532:65532
+
+# Expose ports: gRPC (50051), HTTP (8080), Prometheus (9090)
+EXPOSE 50051 8080 9090
+
+ENTRYPOINT ["/app/inference-router"]
+CMD ["--config", "/app/config.yaml"]
+

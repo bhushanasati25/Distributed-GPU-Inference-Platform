@@ -1,0 +1,28 @@
+# Base NVIDIA Triton Server with TensorRT backend
+FROM nvcr.io/nvidia/tritonserver:24.01-py3
+
+LABEL maintainer="Platform Engineering"
+LABEL description="Optimized Triton Server container for distributed GPU inference platform"
+
+# Install additional python clients and telemetry utilities
+RUN pip install --no-cache-dir \
+    numpy>=1.24.0 \
+    pyarrow>=14.0.0 \
+    boto3>=1.28.0
+
+# Create model repository directory
+RUN mkdir -p /models && chmod 777 /models
+
+# Expose Triton service ports:
+# 8000: HTTP REST API
+# 8001: gRPC API
+# 8002: Prometheus Metrics
+EXPOSE 8000 8001 8002
+
+# Health check
+HEALTHCHECK --interval=5s --timeout=3s --retries=3 \
+    CMD curl -f http://localhost:8000/v2/health/ready || exit 1
+
+ENTRYPOINT ["tritonserver"]
+CMD ["--model-repository=/models", "--strict-model-config=false", "--log-verbose=0"]
+

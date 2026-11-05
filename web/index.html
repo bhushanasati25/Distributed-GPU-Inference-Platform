@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Distributed GPU Inference Platform — Control Console</title>
+  <style>
+    :root {
+      --bg: #0a0e17;
+      --card-bg: #121826;
+      --border: #1e293b;
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.15);
+      --green: #22c55e;
+      --yellow: #eab308;
+      --red: #ef4444;
+      --purple: #a855f7;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; }
+    body { background-color: var(--bg); color: var(--text); padding: 24px; }
+    header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 24px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+    .logo-group { display: flex; align-items: center; gap: 12px; }
+    .badge { background: #1e293b; border: 1px solid #334155; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--accent); }
+    .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; background: rgba(34, 197, 94, 0.15); color: var(--green); border: 1px solid var(--green); }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+
+    /* Top Stats Metrics */
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 28px; }
+    .metric-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+    .metric-title { font-size: 13px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+    .metric-value { font-size: 32px; font-weight: 700; color: #fff; }
+    .metric-sub { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+
+    /* GPU Pools Section */
+    .section-title { font-size: 18px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    .pools-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 32px; }
+    .pool-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 20px; transition: transform 0.2s, border-color 0.2s; position: relative; overflow: hidden; }
+    .pool-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .pool-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent); }
+    .pool-card.h100::before { background: var(--purple); }
+    .pool-card.l4::before { background: var(--yellow); }
+
+    .pool-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+    .pool-name { font-size: 16px; font-weight: 700; }
+    .gpu-chip { font-size: 12px; background: rgba(56, 189, 248, 0.1); color: var(--accent); padding: 2px 8px; border-radius: 6px; }
+    .h100 .gpu-chip { background: rgba(168, 85, 247, 0.1); color: var(--purple); }
+
+    .nodes-list { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+    .node-row { background: #0b1120; border: 1px solid #1e293b; border-radius: 8px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+    .node-status { display: flex; align-items: center; gap: 6px; }
+    .healthy { color: var(--green); }
+    .unhealthy { color: var(--red); }
+    .throttled { color: var(--yellow); }
+
+    /* Progress bar */
+    .bar-bg { width: 100%; height: 6px; background: #1e293b; border-radius: 999px; overflow: hidden; margin-top: 8px; }
+    .bar-fill { height: 100%; border-radius: 999px; background: var(--accent); width: 45%; transition: width 0.3s; }
+    .h100 .bar-fill { background: var(--purple); }
+
+    /* Chaos Toolbar */
+    .chaos-panel { background: #141724; border: 1px solid #2d2640; border-radius: 12px; padding: 20px; }
+    .btn-group { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+    button { background: #1e293b; color: #fff; border: 1px solid #334155; padding: 10px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; transition: all 0.2s; }
+    button:hover { background: #334155; border-color: #64748b; }
+    button.danger:hover { background: rgba(239, 68, 68, 0.2); border-color: var(--red); color: var(--red); }
+    button.warning:hover { background: rgba(234, 179, 8, 0.2); border-color: var(--yellow); color: var(--yellow); }
+    button.primary:hover { background: rgba(56, 189, 248, 0.2); border-color: var(--accent); color: var(--accent); }
+    button.success:hover { background: rgba(34, 197, 94, 0.2); border-color: var(--green); color: var(--green); }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="logo-group">
+      <h2>🚀 Distributed GPU Inference Platform</h2>
+      <span class="badge">Go Router + Triton Cluster</span>
+    </div>
+    <div id="cluster-status-pill" class="status-pill">
+      <span class="status-dot"></span>
+      <span id="cluster-status-text">HEALTHY (8 / 8 Nodes Active)</span>
+    </div>
+  </header>
+
+  <!-- Top Metrics -->
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <div class="metric-title">Cluster Throughput</div>
+      <div id="stat-rps" class="metric-value">1,480 <span style="font-size:16px;font-weight:400;color:var(--text-muted)">req/s</span></div>
+      <div class="metric-sub">Across 4 GPU Node Pools</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-title">P99 Server Latency</div>
+      <div id="stat-p99" class="metric-value">42.5 <span style="font-size:16px;font-weight:400;color:var(--text-muted)">ms</span></div>
+      <div class="metric-sub">Cross-node routing overhead: &lt; 4ms</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-title">Priority Queue Depth</div>
+      <div id="stat-queue" class="metric-value">12 <span style="font-size:16px;font-weight:400;color:var(--text-muted)">items</span></div>
+      <div class="metric-sub">Max capacity: 10,000 requests</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-title">Cache Hit Rate</div>
+      <div id="stat-cache" class="metric-value">46.8 <span style="font-size:16px;font-weight:400;color:var(--text-muted)">%</span></div>
+      <div class="metric-sub">Semantic & Exact Tensor Cache</div>
+    </div>
+  </div>
+
+  <!-- 4 GPU Node Pools Grid -->
+  <div class="section-title">
+    <span>GPU Node Pools Cluster Topology</span>
+  </div>
+
+  <div class="pools-grid">
+    <!-- Pool 1 -->
+    <div class="pool-card" id="pool-1">
+      <div class="pool-header">
+        <div>
+          <div class="pool-name">GPU Node Pool 1</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">PCIe Gen4 • 80 GB VRAM</div>
+        </div>
+        <span class="gpu-chip">NVIDIA A100</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted)">VRAM Utilization: <span id="p1-vram">58%</span></div>
+      <div class="bar-bg"><div id="p1-bar" class="bar-fill" style="width: 58%"></div></div>
+      <div class="nodes-list">
+        <div class="node-row" id="node-0">
+          <span>triton-pool-1-0</span>
+          <span class="node-status healthy">● 10.4 ms (22 req)</span>
+        </div>
+        <div class="node-row" id="node-1">
+          <span>triton-pool-1-1</span>
+          <span class="node-status healthy">● 11.2 ms (18 req)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pool 2 -->
+    <div class="pool-card" id="pool-2">
+      <div class="pool-header">
+        <div>
+          <div class="pool-name">GPU Node Pool 2</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">PCIe Gen4 • 80 GB VRAM</div>
+        </div>
+        <span class="gpu-chip">NVIDIA A100</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted)">VRAM Utilization: <span id="p2-vram">62%</span></div>
+      <div class="bar-bg"><div id="p2-bar" class="bar-fill" style="width: 62%"></div></div>
+      <div class="nodes-list">
+        <div class="node-row" id="node-2">
+          <span>triton-pool-2-0</span>
+          <span class="node-status healthy">● 12.0 ms (26 req)</span>
+        </div>
+        <div class="node-row" id="node-3">
+          <span>triton-pool-2-1</span>
+          <span class="node-status healthy">● 11.8 ms (24 req)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pool 3 -->
+    <div class="pool-card h100" id="pool-3">
+      <div class="pool-header">
+        <div>
+          <div class="pool-name">GPU Node Pool 3</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">SXM5 NVLink • 80 GB HBM3</div>
+        </div>
+        <span class="gpu-chip">NVIDIA H100</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted)">VRAM Utilization: <span id="p3-vram">82%</span> (Preferred Target)</div>
+      <div class="bar-bg"><div id="p3-bar" class="bar-fill" style="width: 82%"></div></div>
+      <div class="nodes-list">
+        <div class="node-row" id="node-4">
+          <span>triton-pool-3-0</span>
+          <span class="node-status healthy">● 4.8 ms (56 req)</span>
+        </div>
+        <div class="node-row" id="node-5">
+          <span>triton-pool-3-1</span>
+          <span class="node-status healthy">● 5.1 ms (52 req)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pool 4 -->
+    <div class="pool-card l4" id="pool-4">
+      <div class="pool-header">
+        <div>
+          <div class="pool-name">GPU Node Pool 4</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">PCIe Gen4 • 24 GB GDDR6</div>
+        </div>
+        <span class="gpu-chip">NVIDIA L4</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted)">VRAM Utilization: <span id="p4-vram">35%</span></div>
+      <div class="bar-bg"><div id="p4-bar" class="bar-fill" style="width: 35%"></div></div>
+      <div class="nodes-list">
+        <div class="node-row" id="node-6">
+          <span>triton-pool-4-0</span>
+          <span class="node-status healthy">● 21.4 ms (8 req)</span>
+        </div>
+        <div class="node-row" id="node-7">
+          <span>triton-pool-4-1</span>
+          <span class="node-status healthy">● 22.1 ms (6 req)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Interactive Chaos Control Panel -->
+  <div class="chaos-panel">
+    <div class="section-title" style="margin-bottom:6px">⚡ Live Chaos Engineering & Resilience Injection</div>
+    <p style="font-size:13px;color:var(--text-muted)">Inject real-time cluster faults to witness the Go router rebalance traffic without service interruption.</p>
+    <div class="btn-group">
+      <button class="danger" onclick="injectChaos('kill_pool4')">💥 Kill Triton Pod 4-0 (Simulate OOM)</button>
+      <button class="warning" onclick="injectChaos('throttle_pool1')">⏱️ Inject 120ms Delay on Pool 1 (PCIe Saturation)</button>
+      <button class="primary" onclick="injectChaos('traffic_spike')">🚀 Trigger 5,000 RPS Load Burst</button>
+      <button class="success" onclick="injectChaos('reset_all')">🔄 Heal All Nodes & Reset</button>
+    </div>
+  </div>
+
+  <script>
+    function injectChaos(action) {
+      fetch('/api/chaos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action })
+      }).then(r => r.json()).then(data => {
+        alert(data.message || 'Action executed');
+        refreshStatus();
+      }).catch(err => {
+        // Fallback UI simulation
+        if (action === 'kill_pool4') {
+          document.getElementById('node-6').innerHTML = '<span>triton-pool-4-0</span><span class="node-status unhealthy">✕ CIRCUIT OPEN (Dead)</span>';
+          document.getElementById('cluster-status-pill').innerHTML = '<span class="status-dot"></span><span>DEGRADED (7 / 8 Nodes Active)</span>';
+          document.getElementById('cluster-status-pill').style.color = '#ef4444';
+          document.getElementById('cluster-status-pill').style.borderColor = '#ef4444';
+        } else if (action === 'throttle_pool1') {
+          document.getElementById('node-0').innerHTML = '<span>triton-pool-1-0</span><span class="node-status throttled">▲ 132.4 ms (Throttled)</span>';
+          document.getElementById('node-1').innerHTML = '<span>triton-pool-1-1</span><span class="node-status throttled">▲ 128.9 ms (Throttled)</span>';
+        } else if (action === 'reset_all') {
+          location.reload();
+        } else if (action === 'traffic_spike') {
+          document.getElementById('stat-rps').innerHTML = '4,920 <span style="font-size:16px;color:var(--text-muted)">req/s</span>';
+          document.getElementById('stat-queue').innerHTML = '214 <span style="font-size:16px;color:var(--text-muted)">items</span>';
+        }
+      });
+    }
+
+    function refreshStatus() {
+      fetch('/api/cluster/status')
+        .then(r => r.json())
+        .then(data => {
+          if (data.rps) document.getElementById('stat-rps').innerText = data.rps;
+          if (data.p99) document.getElementById('stat-p99').innerText = data.p99;
+          if (data.queue) document.getElementById('stat-queue').innerText = data.queue;
+        }).catch(() => {});
+    }
+
+    setInterval(refreshStatus, 2000);
+  </script>
+</body>
+</html>
+

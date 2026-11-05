@@ -1,0 +1,50 @@
+# =============================================================================
+# Kubernetes Ingress: High-Throughput gRPC & HTTP Gateway
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: inference-router-ingress
+  namespace: inference
+  labels:
+    app: distributed-gpu-inference
+    component: ingress
+  annotations:
+    # Enable gRPC backend protocol negotiation
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+    # Allow large tensor payloads up to 128MB
+    nginx.ingress.kubernetes.io/proxy-body-size: "128m"
+    # Extended timeouts for long-running batch sequences
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120s"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120s"
+    # HTTP/2 support for multiplexed gRPC streaming
+    nginx.ingress.kubernetes.io/server-snippet: |
+      http2_max_field_size 64k;
+      http2_max_header_size 128k;
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - inference.platform.internal
+      secretName: inference-tls-cert
+  rules:
+    - host: inference.platform.internal
+      http:
+        paths:
+          # Route gRPC inference service calls
+          - path: /inference.InferenceService
+            pathType: Prefix
+            backend:
+              service:
+                name: inference-router
+                port:
+                  number: 50051
+          # Route HTTP web console & health probes
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: inference-router
+                port:
+                  number: 8080
+

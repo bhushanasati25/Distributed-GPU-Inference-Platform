@@ -1,0 +1,137 @@
+# =============================================================================
+# NVIDIA DCGM Exporter DaemonSet
+# =============================================================================
+# Deploys the NVIDIA Data Center GPU Manager (DCGM) Exporter as a DaemonSet
+# on all GPU-labeled nodes. Exposes GPU metrics (utilization, memory, temp,
+# power, ECC errors) on port 9400 for Prometheus scraping.
+# =============================================================================
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: dcgm-exporter
+  namespace: monitoring
+  labels:
+    app: distributed-gpu-inference
+    component: dcgm-exporter
+  annotations:
+    description: "NVIDIA DCGM Exporter for GPU metrics on all GPU nodes"
+spec:
+  selector:
+    matchLabels:
+      app: distributed-gpu-inference
+      component: dcgm-exporter
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: distributed-gpu-inference
+        component: dcgm-exporter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9400"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Only schedule on GPU-labeled nodes
+      nodeSelector:
+        gpu-node: "true"
+
+      # Tolerate GPU taints
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+
+      containers:
+        - name: dcgm-exporter
+          image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.3-3.3.1-ubuntu22.04
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: metrics
+              containerPort: 9400
+              protocol: TCP
+
+          env:
+            # Collect all available GPU metrics
+            - name: DCGM_EXPORTER_LISTEN
+              value: ":9400"
+            - name: DCGM_EXPORTER_KUBERNETES
+              value: "true"
+            # Interval between metric collections (in milliseconds)
+            - name: DCGM_EXPORTER_INTERVAL
+              value: "5000"
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+
+          # Security: needs access to NVIDIA device files
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            privileged: true
+
+          volumeMounts:
+            # Access NVIDIA device files
+            - name: nvidia-install-dir-host
+              mountPath: /usr/local/nvidia
+              readOnly: true
+            # Access /dev/nvidia* devices
+            - name: devices
+              mountPath: /dev
+              readOnly: true
+            # Access /proc for NVIDIA driver info
+            - name: proc
+              mountPath: /proc
+              readOnly: true
+            # Access /sys for PCI device info
+            - name: sys
+              mountPath: /sys
+              readOnly: true
+
+      volumes:
+        - name: nvidia-install-dir-host
+          hostPath:
+            path: /usr/local/nvidia
+            type: DirectoryOrCreate
+        - name: devices
+          hostPath:
+            path: /dev
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: sys
+          hostPath:
+            path: /sys
+---
+# Service for Prometheus to scrape DCGM Exporter metrics
+apiVersion: v1
+kind: Service
+metadata:
+  name: dcgm-exporter
+  namespace: monitoring
+  labels:
+    app: distributed-gpu-inference
+    component: dcgm-exporter
+    monitoring: "true"
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9400"
+spec:
+  type: ClusterIP
+  selector:
+    app: distributed-gpu-inference
+    component: dcgm-exporter
+  ports:
+    - name: metrics
+      port: 9400
+      targetPort: 9400
+      protocol: TCP

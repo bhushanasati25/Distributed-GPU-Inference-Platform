@@ -1,0 +1,53 @@
+# Binaries and build artifacts
+bin/
+dist/
+*.o
+*.a
+*.so
+
+# Go
+vendor/
+go.work
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+env/
+venv/
+
+# Deep Learning Models & Heavy Datasets
+*.plan
+*.engine
+*.onnx
+*.pt
+*.bin
+*.parquet
+*.tar
+/tmp/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.lock.hcl
+
+# IDE and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+

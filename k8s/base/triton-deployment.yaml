@@ -1,0 +1,191 @@
+# =============================================================================
+# Triton Inference Server StatefulSet
+# =============================================================================
+# Deploys NVIDIA Triton Inference Server as a StatefulSet with 8 replicas
+# (2 per GPU pool). Each pod requests 1 GPU and mounts a shared model
+# repository PVC. Pod anti-affinity spreads replicas across nodes for HA.
+# =============================================================================
+
+# ServiceAccount for Triton pods - enables RBAC-based access control
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: triton-inference-server
+  namespace: inference
+  labels:
+    app: distributed-gpu-inference
+    component: triton
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: triton-inference-server
+  namespace: inference
+  labels:
+    app: distributed-gpu-inference
+    component: triton
+    tier: backend
+  annotations:
+    description: "NVIDIA Triton Inference Server StatefulSet with GPU scheduling"
+spec:
+  # 8 replicas distributed across GPU pools (2 per pool for 4 pools)
+  replicas: 8
+  serviceName: triton-inference-server-headless
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: distributed-gpu-inference
+      component: triton
+  # Rolling update strategy: update one pod at a time to maintain availability
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app: distributed-gpu-inference
+        component: triton
+        tier: backend
+      annotations:
+        # Prometheus scrape annotations for metrics collection
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8002"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: triton-inference-server
+      terminationGracePeriodSeconds: 120
+
+      # ---------- Scheduling Constraints ----------
+
+      # Require GPU-labeled nodes for scheduling
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: gpu-node
+                    operator: In
+                    values:
+                      - "true"
+        # Prefer spreading pods across different nodes for fault tolerance
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: component
+                      operator: In
+                      values:
+                        - triton
+                topologyKey: kubernetes.io/hostname
+
+      # Tolerate GPU taints so pods can schedule on GPU nodes
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+
+      containers:
+        - name: triton-inference-server
+          image: nvcr.io/nvidia/tritonserver:24.01-py3
+          imagePullPolicy: IfNotPresent
+
+          # Start Triton with model repository path and verbose logging
+          args:
+            - tritonserver
+            - --model-repository=/models
+            - --strict-model-config=false
+            - --log-verbose=1
+
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+            - name: grpc
+              containerPort: 8001
+              protocol: TCP
+            - name: metrics
+              containerPort: 8002
+              protocol: TCP
+
+          env:
+            # Control which GPU device the container sees
+            - name: CUDA_VISIBLE_DEVICES
+              value: "0"
+            # Preload libraries for performance (e.g., jemalloc)
+            - name: LD_PRELOAD
+              value: ""
+            # Identify the pod for logging and tracing
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+          # ---------- Resource Requests and Limits ----------
+          resources:
+            requests:
+              cpu: "4"
+              memory: 16Gi
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "4"
+              memory: 16Gi
+              nvidia.com/gpu: "1"
+
+          # ---------- Health Probes ----------
+
+          # Readiness: Triton reports ready once models are loaded
+          readinessProbe:
+            httpGet:
+              path: /v2/health/ready
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+
+          # Liveness: Triton reports live if the server process is healthy
+          livenessProbe:
+            httpGet:
+              path: /v2/health/live
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+            successThreshold: 1
+
+          # Startup probe: give Triton up to 5 minutes to load large models
+          startupProbe:
+            httpGet:
+              path: /v2/health/live
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 30
+
+          volumeMounts:
+            - name: model-repository
+              mountPath: /models
+              readOnly: true
+            # Shared memory for inter-process communication
+            - name: dshm
+              mountPath: /dev/shm
+
+      volumes:
+        # Model repository PVC (shared across all Triton replicas)
+        - name: model-repository
+          persistentVolumeClaim:
+            claimName: model-repository
+        # Increase shared memory for GPU inter-process communication
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi

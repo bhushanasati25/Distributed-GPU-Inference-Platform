@@ -1,0 +1,257 @@
+# =============================================================================
+# MinIO Distributed Object Storage
+# =============================================================================
+# Deploys MinIO in distributed mode with 4 replicas for high availability.
+# Each replica gets a 100Gi PVC. An init container creates required buckets
+# (models, datasets, checkpoints) after MinIO starts.
+# =============================================================================
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  namespace: data
+  labels:
+    app: distributed-gpu-inference
+    component: minio
+  annotations:
+    description: "MinIO distributed object storage for model artifacts and datasets"
+spec:
+  replicas: 4
+  serviceName: minio-headless
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: distributed-gpu-inference
+      component: minio
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: distributed-gpu-inference
+        component: minio
+    spec:
+      terminationGracePeriodSeconds: 60
+
+      # Init container to create required buckets once MinIO is healthy
+      initContainers:
+        - name: create-buckets
+          image: minio/mc:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Waiting for MinIO to become ready..."
+              # Wait for MinIO to be reachable (up to 120 seconds)
+              for i in $(seq 1 60); do
+                if mc alias set local http://localhost:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" 2>/dev/null; then
+                  echo "MinIO is ready."
+                  break
+                fi
+                echo "Attempt $i: MinIO not ready, waiting 2s..."
+                sleep 2
+              done
+
+              # Create buckets if they don't exist
+              mc mb --ignore-existing local/models
+              mc mb --ignore-existing local/datasets
+              mc mb --ignore-existing local/checkpoints
+
+              echo "Buckets created successfully."
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_ROOT_PASSWORD
+          # Share the network namespace with the MinIO sidecar
+          # NOTE: In practice, bucket creation is done via a Job after
+          # the StatefulSet is healthy. This init container demonstrates
+          # the concept; see the post-install Job below for a working approach.
+
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2024-01-29T03-56-32Z
+          imagePullPolicy: IfNotPresent
+
+          # Distributed mode: MinIO discovers peers via headless service DNS
+          args:
+            - server
+            - http://minio-{0...3}.minio-headless.data.svc.cluster.local/data
+            - --console-address
+            - ":9001"
+
+          ports:
+            - name: api
+              containerPort: 9000
+              protocol: TCP
+            - name: console
+              containerPort: 9001
+              protocol: TCP
+
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_ROOT_PASSWORD
+            # Enable Prometheus metrics
+            - name: MINIO_PROMETHEUS_AUTH_TYPE
+              value: "public"
+
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+
+          volumeMounts:
+            - name: data
+              mountPath: /data
+
+  # VolumeClaimTemplates create a 100Gi PVC per MinIO replica
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app: distributed-gpu-inference
+          component: minio
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 100Gi
+        # Uncomment and set your storage class
+        # storageClassName: fast-ssd
+---
+# Headless service for MinIO StatefulSet DNS discovery
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-headless
+  namespace: data
+  labels:
+    app: distributed-gpu-inference
+    component: minio
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: distributed-gpu-inference
+    component: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+# ClusterIP service for MinIO API access
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: data
+  labels:
+    app: distributed-gpu-inference
+    component: minio
+  annotations:
+    description: "MinIO API and console service"
+spec:
+  type: ClusterIP
+  selector:
+    app: distributed-gpu-inference
+    component: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+# Post-install Job to create buckets after MinIO is fully ready
+# This is more reliable than using an init container in the StatefulSet
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-create-buckets
+  namespace: data
+  labels:
+    app: distributed-gpu-inference
+    component: minio
+  annotations:
+    description: "One-time job to create required MinIO buckets"
+spec:
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Configuring MinIO client..."
+              mc alias set minio http://minio.data.svc.cluster.local:9000 \
+                "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
+
+              echo "Creating buckets..."
+              mc mb --ignore-existing minio/models
+              mc mb --ignore-existing minio/datasets
+              mc mb --ignore-existing minio/checkpoints
+
+              echo "Setting bucket policies..."
+              mc anonymous set download minio/models
+
+              echo "Done. All buckets created successfully."
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_ROOT_PASSWORD

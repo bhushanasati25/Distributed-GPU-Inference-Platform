@@ -1,0 +1,32 @@
+# =============================================================================
+# Model Repository PersistentVolumeClaim
+# =============================================================================
+# Shared PVC for the Triton model repository. ReadWriteMany access mode
+# allows all Triton StatefulSet replicas to mount the same volume
+# simultaneously. Requires a storage class that supports RWX
+# (e.g., NFS, EFS, Azure Files, GlusterFS).
+# =============================================================================
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-repository
+  namespace: inference
+  labels:
+    app: distributed-gpu-inference
+    component: model-store
+  annotations:
+    description: "Shared model repository PVC mounted by all Triton inference replicas"
+spec:
+  accessModes:
+    # ReadWriteMany is required for shared access across StatefulSet pods
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+  # Uncomment and set the appropriate storage class for your cluster:
+  #   - AWS EKS:  storageClassName: efs-sc
+  #   - GKE:      storageClassName: standard-rwx
+  #   - Azure:    storageClassName: azurefile-csi
+  #   - On-prem:  storageClassName: nfs-client
+  # storageClassName: nfs-client

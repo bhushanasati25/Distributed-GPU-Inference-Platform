@@ -1,0 +1,816 @@
+# =============================================================================
+# Grafana Dashboard Definitions
+# =============================================================================
+# Contains four JSON dashboard definitions for the GPU Inference Platform:
+#   1. Cluster Overview - Active nodes, RPS, error rate, active models
+#   2. GPU Utilization  - GPU util heatmap, memory, temperature, power
+#   3. Inference Latency - E2E P50/P99, queue/compute times, routing overhead
+#   4. Router Performance - Queue depth, backend health, connection pool, RPS
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: monitoring
+  labels:
+    app: distributed-gpu-inference
+    component: grafana
+  annotations:
+    description: "Pre-built Grafana dashboards for inference platform monitoring"
+data:
+  # ============================= Dashboard 1 ================================
+  cluster-overview.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "title": "Active GPU Nodes",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "count(kube_node_status_condition{condition=\"Ready\",status=\"true\"} * on(node) kube_node_labels{label_gpu_node=\"true\"})",
+              "legendFormat": "Active GPU Nodes"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "yellow", "value": 2 },
+                  { "color": "green", "value": 4 }
+                ]
+              },
+              "unit": "none"
+            }
+          }
+        },
+        {
+          "title": "Total Inference RPS",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(nv_inference_request_success[5m]))",
+              "legendFormat": "RPS"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 500 },
+                  { "color": "red", "value": 1000 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Error Rate",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(nv_inference_request_failure[5m])) / (sum(rate(nv_inference_request_success[5m])) + sum(rate(nv_inference_request_failure[5m]))) * 100",
+              "legendFormat": "Error %"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 0.5 },
+                  { "color": "red", "value": 1 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Active Models",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "count(count by (model)(nv_inference_request_success))",
+              "legendFormat": "Models"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "steps": [
+                  { "color": "blue", "value": null }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Inference RPS Over Time",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(nv_inference_request_success[5m])) by (model)",
+              "legendFormat": "{{ model }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 } }
+          }
+        },
+        {
+          "title": "Error Rate Over Time",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(nv_inference_request_failure[5m])) by (model)",
+              "legendFormat": "{{ model }} errors"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "reqps", "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 50 } }
+          }
+        },
+        {
+          "title": "Triton Pod Status",
+          "type": "table",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "kube_pod_status_ready{namespace=\"inference\", pod=~\"triton.*\"} == 1",
+              "legendFormat": "{{ pod }}",
+              "format": "table",
+              "instant": true
+            }
+          ]
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 39,
+      "tags": ["gpu-inference", "overview"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "title": "GPU Inference - Cluster Overview",
+      "uid": "cluster-overview"
+    }
+
+  # ============================= Dashboard 2 ================================
+  gpu-utilization.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "title": "GPU Utilization Heatmap",
+          "type": "heatmap",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "DCGM_FI_DEV_GPU_UTIL",
+              "legendFormat": "{{ gpu }} on {{ instance }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "percent" }
+          },
+          "options": {
+            "calculate": false,
+            "cellGap": 1,
+            "color": { "mode": "scheme", "scheme": "Oranges" },
+            "yAxis": { "unit": "percent" }
+          }
+        },
+        {
+          "title": "GPU Utilization Per Device",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "DCGM_FI_DEV_GPU_UTIL",
+              "legendFormat": "GPU {{ gpu }} - {{ instance }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15 },
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 70 },
+                  { "color": "red", "value": 90 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "GPU Memory Usage",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "DCGM_FI_DEV_FB_USED / (DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE) * 100",
+              "legendFormat": "GPU {{ gpu }} - {{ instance }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "min": 0,
+              "max": 100,
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 20 },
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 80 },
+                  { "color": "red", "value": 95 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "GPU Temperature (°C)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "DCGM_FI_DEV_GPU_TEMP",
+              "legendFormat": "GPU {{ gpu }} - {{ instance }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "celsius",
+              "min": 20,
+              "max": 100,
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 75 },
+                  { "color": "red", "value": 85 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "GPU Power Draw (W)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "DCGM_FI_DEV_POWER_USAGE",
+              "legendFormat": "GPU {{ gpu }} - {{ instance }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "watt",
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 },
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 250 },
+                  { "color": "red", "value": 300 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "GPU Memory Used (MiB)",
+          "type": "gauge",
+          "gridPos": { "h": 6, "w": 24, "x": 0, "y": 24 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "DCGM_FI_DEV_FB_USED",
+              "legendFormat": "GPU {{ gpu }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "decmbytes",
+              "min": 0,
+              "max": 81920,
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 65536 },
+                  { "color": "red", "value": 77824 }
+                ]
+              }
+            }
+          },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "showThresholdLabels": false }
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 39,
+      "tags": ["gpu-inference", "gpu"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "title": "GPU Inference - GPU Utilization",
+      "uid": "gpu-utilization"
+    }
+
+  # ============================= Dashboard 3 ================================
+  inference-latency.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "title": "End-to-End Latency P50",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.5, sum(rate(router_request_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "P50"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 0.1 },
+                  { "color": "red", "value": 0.5 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "End-to-End Latency P95",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(router_request_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "P95"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 0.2 },
+                  { "color": "red", "value": 0.5 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "End-to-End Latency P99",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(router_request_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "P99"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 0.3 },
+                  { "color": "red", "value": 0.5 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Routing Overhead P99",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(router_routing_overhead_seconds_bucket[5m])) by (le))",
+              "legendFormat": "Routing Overhead P99"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 0.005 },
+                  { "color": "red", "value": 0.01 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "E2E Latency Distribution Over Time",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.5, sum(rate(router_request_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "P50"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(router_request_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "P95"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(router_request_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "P99"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "pointSize": 5 }
+            }
+          }
+        },
+        {
+          "title": "Triton Queue Time (per model)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "rate(nv_inference_queue_duration_us[5m]) / 1e6",
+              "legendFormat": "{{ model }} queue time"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15 }
+            }
+          }
+        },
+        {
+          "title": "Triton Compute Time (per model)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "rate(nv_inference_compute_infer_duration_us[5m]) / 1e6",
+              "legendFormat": "{{ model }} compute time"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15 }
+            }
+          }
+        },
+        {
+          "title": "Routing Overhead Over Time",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.5, sum(rate(router_routing_overhead_seconds_bucket[5m])) by (le))",
+              "legendFormat": "Overhead P50"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(router_routing_overhead_seconds_bucket[5m])) by (le))",
+              "legendFormat": "Overhead P99"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 }
+            }
+          }
+        },
+        {
+          "title": "Latency By Model",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(router_request_duration_seconds_bucket[5m])) by (le, model))",
+              "legendFormat": "{{ model }} P99"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 }
+            }
+          }
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 39,
+      "tags": ["gpu-inference", "latency"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "title": "GPU Inference - Inference Latency",
+      "uid": "inference-latency"
+    }
+
+  # ============================= Dashboard 4 ================================
+  router-performance.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "title": "Queue Depth",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(router_queue_depth)",
+              "legendFormat": "Queue Depth"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 500 },
+                  { "color": "red", "value": 1000 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Healthy Backends",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(router_backend_health_status == 1)",
+              "legendFormat": "Healthy"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "steps": [
+                  { "color": "red", "value": null },
+                  { "color": "yellow", "value": 4 },
+                  { "color": "green", "value": 6 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Active Connections",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(router_connection_pool_active)",
+              "legendFormat": "Active"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 50 },
+                  { "color": "red", "value": 80 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Router RPS",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(router_requests_total[5m]))",
+              "legendFormat": "RPS"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 500 },
+                  { "color": "red", "value": 1000 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Queue Depth Over Time",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "router_queue_depth",
+              "legendFormat": "{{ instance }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 20 },
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 500 },
+                  { "color": "red", "value": 1000 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Backend Health Status",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "router_backend_health_status",
+              "legendFormat": "{{ backend }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bool",
+              "min": 0,
+              "max": 1,
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 50, "stacking": { "mode": "none" } },
+              "mappings": [
+                { "type": "value", "options": { "0": { "text": "Down", "color": "red" }, "1": { "text": "Up", "color": "green" } } }
+              ]
+            }
+          }
+        },
+        {
+          "title": "Connection Pool Utilization",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "router_connection_pool_active",
+              "legendFormat": "Active - {{ backend }}"
+            },
+            {
+              "expr": "router_connection_pool_idle",
+              "legendFormat": "Idle - {{ backend }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15 }
+            }
+          }
+        },
+        {
+          "title": "Requests Per Backend",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(router_requests_total[5m])) by (backend)",
+              "legendFormat": "{{ backend }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 60 }
+            }
+          }
+        },
+        {
+          "title": "Circuit Breaker State",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "router_circuit_breaker_state",
+              "legendFormat": "{{ backend }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "none",
+              "mappings": [
+                { "type": "value", "options": { "0": { "text": "Closed" }, "1": { "text": "Half-Open" }, "2": { "text": "Open" } } }
+              ]
+            }
+          }
+        },
+        {
+          "title": "Rate Limiting Events",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(router_rate_limited_requests_total[5m]))",
+              "legendFormat": "Rate Limited RPS"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 30 }
+            }
+          }
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 39,
+      "tags": ["gpu-inference", "router"],
+      "templating": { "list": [] },
+      "time": { "from": "now-1h", "to": "now" },
+      "title": "GPU Inference - Router Performance",
+      "uid": "router-performance"
+    }

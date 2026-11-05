@@ -1,0 +1,65 @@
+# =============================================================================
+# Inference Router Services
+# =============================================================================
+# Two services expose the inference router:
+#   1. LoadBalancer service for external gRPC and HTTP inference traffic
+#   2. ClusterIP service for internal Prometheus metrics scraping
+# =============================================================================
+
+# External-facing LoadBalancer service for inference traffic
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-router
+  namespace: inference
+  labels:
+    app: distributed-gpu-inference
+    component: router
+  annotations:
+    description: "External LoadBalancer for inference requests via gRPC and HTTP"
+    # Cloud provider annotations (uncomment as needed)
+    # service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    # service.beta.kubernetes.io/azure-load-balancer-internal: "false"
+spec:
+  type: LoadBalancer
+  selector:
+    app: distributed-gpu-inference
+    component: router
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+      protocol: TCP
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+  # Optional: restrict to known CIDR ranges in production
+  # loadBalancerSourceRanges:
+  #   - 10.0.0.0/8
+---
+# Internal ClusterIP service for Prometheus metrics scraping
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-router-metrics
+  namespace: inference
+  labels:
+    app: distributed-gpu-inference
+    component: router
+    monitoring: "true"
+  annotations:
+    description: "Internal metrics endpoint for Prometheus scraping"
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app: distributed-gpu-inference
+    component: router
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP

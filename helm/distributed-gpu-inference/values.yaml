@@ -1,0 +1,113 @@
+# =============================================================================
+# Default values for distributed-gpu-inference Helm Chart
+# =============================================================================
+
+global:
+  environment: prod
+  imageRegistry: distributed-gpu-inference
+  imageTag: latest
+
+# -----------------------------------------------------------------------------
+# Inference Router Configuration
+# -----------------------------------------------------------------------------
+router:
+  replicaCount: 3
+  image:
+    repository: distributed-gpu-inference/router
+    pullPolicy: IfNotPresent
+    tag: "latest"
+
+  service:
+    type: LoadBalancer
+    grpcPort: 50051
+    httpPort: 8080
+    metricsPort: 9090
+
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+  loadBalancing:
+    algorithm: "latency_aware"
+    alpha: 0.40 # in-flight requests penalty
+    beta: 0.40  # EMA latency penalty
+    gamma: 0.20 # capacity queue penalty
+
+  queue:
+    maxDepth: 10000
+    defaultTimeout: 5s
+
+# -----------------------------------------------------------------------------
+# NVIDIA Triton GPU Servers Configuration
+# -----------------------------------------------------------------------------
+triton:
+  replicaCount: 8
+  image:
+    repository: nvcr.io/nvidia/tritonserver
+    tag: "24.01-py3"
+    pullPolicy: IfNotPresent
+
+  modelRepositoryPath: "/models"
+
+  gpu:
+    enabled: true
+    resourceLimit: 1
+    type: "nvidia.com/gpu"
+
+  resources:
+    limits:
+      nvidia.com/gpu: 1
+      cpu: 8000m
+      memory: 32Gi
+    requests:
+      nvidia.com/gpu: 1
+      cpu: 4000m
+      memory: 16Gi
+
+  tolerations:
+    - key: "nvidia.com/gpu"
+      operator: "Exists"
+      effect: "NoSchedule"
+
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: "gpu-node"
+              operator: "In"
+              values: ["true"]
+
+# -----------------------------------------------------------------------------
+# Storage Backends
+# -----------------------------------------------------------------------------
+storage:
+  minio:
+    enabled: true
+    replicas: 4
+    pvcSize: 100Gi
+  redis:
+    enabled: true
+    pvcSize: 10Gi
+
+# -----------------------------------------------------------------------------
+# Observability
+# -----------------------------------------------------------------------------
+monitoring:
+  prometheus:
+    enabled: true
+    scrapeInterval: "15s"
+  grafana:
+    enabled: true
+  dcgmExporter:
+    enabled: true
+

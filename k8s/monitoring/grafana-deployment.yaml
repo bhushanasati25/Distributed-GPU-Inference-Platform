@@ -1,0 +1,173 @@
+# =============================================================================
+# Grafana Deployment with Datasource and Dashboard Provisioning
+# =============================================================================
+# Deploys Grafana with automatic Prometheus datasource configuration and
+# dashboard provisioning from ConfigMaps. Dashboards are loaded from the
+# grafana-dashboards ConfigMap at startup.
+# =============================================================================
+
+# Grafana datasource provisioning ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: monitoring
+  labels:
+    app: distributed-gpu-inference
+    component: grafana
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus.monitoring.svc.cluster.local:9090
+        isDefault: true
+        editable: false
+        jsonData:
+          timeInterval: 15s
+          httpMethod: POST
+---
+# Grafana dashboard provisioning ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provisioning
+  namespace: monitoring
+  labels:
+    app: distributed-gpu-inference
+    component: grafana
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: default
+        orgId: 1
+        folder: GPU Inference Platform
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards
+          foldersFromFilesStructure: false
+---
+# Grafana Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: distributed-gpu-inference
+    component: grafana
+  annotations:
+    description: "Grafana dashboard for inference platform observability"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: distributed-gpu-inference
+      component: grafana
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: distributed-gpu-inference
+        component: grafana
+    spec:
+      securityContext:
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+
+      containers:
+        - name: grafana
+          image: grafana/grafana:10.3.1
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: admin
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: admin  # Change in production
+            - name: GF_INSTALL_PLUGINS
+              value: ""
+            - name: GF_SERVER_ROOT_URL
+              value: "http://localhost:3000"
+
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+
+          volumeMounts:
+            - name: grafana-datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: grafana-dashboard-provisioning
+              mountPath: /etc/grafana/provisioning/dashboards
+              readOnly: true
+            - name: grafana-dashboards
+              mountPath: /var/lib/grafana/dashboards
+              readOnly: true
+            - name: grafana-storage
+              mountPath: /var/lib/grafana
+
+      volumes:
+        - name: grafana-datasources
+          configMap:
+            name: grafana-datasources
+        - name: grafana-dashboard-provisioning
+          configMap:
+            name: grafana-dashboard-provisioning
+        - name: grafana-dashboards
+          configMap:
+            name: grafana-dashboards
+        - name: grafana-storage
+          emptyDir: {}
+---
+# Grafana Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: distributed-gpu-inference
+    component: grafana
+  annotations:
+    description: "Grafana dashboard UI"
+spec:
+  type: ClusterIP
+  selector:
+    app: distributed-gpu-inference
+    component: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      protocol: TCP

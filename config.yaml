@@ -1,0 +1,83 @@
+server:
+  grpc_port: 50051
+  http_port: 8080
+  metrics_port: 9090
+  read_timeout: 10s
+  write_timeout: 10s
+  log_level: "info"
+
+backends:
+  # GPU Node Pool 1
+  - address: "triton-pool-1-0.triton-service.inference.svc.cluster.local:8001"
+    node_pool: "gpu-pool-1"
+    gpu_type: "NVIDIA-A100-80GB"
+    max_concurrent: 64
+    weight: 10
+
+  - address: "triton-pool-1-1.triton-service.inference.svc.cluster.local:8001"
+    node_pool: "gpu-pool-1"
+    gpu_type: "NVIDIA-A100-80GB"
+    max_concurrent: 64
+    weight: 10
+
+  # GPU Node Pool 2
+  - address: "triton-pool-2-0.triton-service.inference.svc.cluster.local:8001"
+    node_pool: "gpu-pool-2"
+    gpu_type: "NVIDIA-A100-80GB"
+    max_concurrent: 64
+    weight: 10
+
+  - address: "triton-pool-2-1.triton-service.inference.svc.cluster.local:8001"
+    node_pool: "gpu-pool-2"
+    gpu_type: "NVIDIA-A100-80GB"
+    max_concurrent: 64
+    weight: 10
+
+  # GPU Node Pool 3
+  - address: "triton-pool-3-0.triton-service.inference.svc.cluster.local:8001"
+    node_pool: "gpu-pool-3"
+    gpu_type: "NVIDIA-H100-80GB"
+    max_concurrent: 128
+    weight: 20
+
+  - address: "triton-pool-3-1.triton-service.inference.svc.cluster.local:8001"
+    node_pool: "gpu-pool-3"
+    gpu_type: "NVIDIA-H100-80GB"
+    max_concurrent: 128
+    weight: 20
+
+  # GPU Node Pool 4
+  - address: "triton-pool-4-0.triton-service.inference.svc.cluster.local:8001"
+    node_pool: "gpu-pool-4"
+    gpu_type: "NVIDIA-L4-24GB"
+    max_concurrent: 32
+    weight: 5
+
+  - address: "triton-pool-4-1.triton-service.inference.svc.cluster.local:8001"
+    node_pool: "gpu-pool-4"
+    gpu_type: "NVIDIA-L4-24GB"
+    max_concurrent: 32
+    weight: 5
+
+load_balancing:
+  algorithm: "latency_aware" # options: latency_aware, round_robin, weighted_random
+  alpha: 0.40                # in-flight requests penalty
+  beta: 0.40                 # exponential moving average latency penalty
+  gamma: 0.20                # capacity saturation penalty
+
+queue:
+  max_depth: 10000
+  default_timeout: 5s
+
+redis:
+  enabled: true
+  address: "redis-service.inference.svc.cluster.local:6379"
+  db: 0
+  ttl: 60s
+
+health_check:
+  interval: 5s
+  timeout: 2s
+  unhealthy_threshold: 3
+  healthy_threshold: 2
+

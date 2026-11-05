@@ -1,0 +1,324 @@
+# =============================================================================
+# Alertmanager Rules (PrometheusRule CRD)
+# =============================================================================
+# Defines critical alert rules for the GPU Inference Platform:
+#   - HighInferenceLatency:     P99 > 500ms for 5 minutes
+#   - GPUMemoryExhausted:       GPU memory > 95% for 2 minutes
+#   - BackendUnhealthy:         Any Triton backend down for 1 minute
+#   - QueueSaturation:          Queue depth > 1000 for 3 minutes
+#   - HighErrorRate:            Error rate > 1% for 5 minutes
+#   - GPUTemperatureCritical:   GPU temp > 85°C for 5 minutes
+#   - TritonModelLoadFailure:   Model failed to load
+#   - RouterHighLatency:        Routing overhead > 10ms for 5 minutes
+#
+# Requires the Prometheus Operator CRDs to be installed in the cluster.
+# If using standalone Prometheus, convert to a rules file ConfigMap.
+# =============================================================================
+
+# Also provide as a ConfigMap for standalone Prometheus setups
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-rules
+  namespace: monitoring
+  labels:
+    app: distributed-gpu-inference
+    component: prometheus
+    prometheus: gpu-inference
+data:
+  inference-alerts.yaml: |
+    groups:
+      # =====================================================================
+      # Inference Performance Alerts
+      # =====================================================================
+      - name: inference.performance
+        rules:
+
+          # -----------------------------------------------------------------
+          # HighInferenceLatency
+          # Fires when P99 end-to-end latency exceeds 500ms for 5 minutes.
+          # This indicates the inference pipeline is too slow for SLA.
+          # -----------------------------------------------------------------
+          - alert: HighInferenceLatency
+            expr: >
+              histogram_quantile(0.99,
+                sum(rate(router_request_duration_seconds_bucket[5m])) by (le)
+              ) > 0.5
+            for: 5m
+            labels:
+              severity: warning
+              team: inference
+            annotations:
+              summary: "High inference latency detected"
+              description: >
+                End-to-end P99 inference latency is {{ $value | humanizeDuration }}
+                (threshold: 500ms). This may indicate GPU saturation, model
+                inefficiency, or network issues.
+              runbook_url: "https://wiki.example.com/runbooks/high-inference-latency"
+
+          # -----------------------------------------------------------------
+          # HighErrorRate
+          # Fires when > 1% of inference requests fail for 5 minutes.
+          # -----------------------------------------------------------------
+          - alert: HighErrorRate
+            expr: >
+              (
+                sum(rate(nv_inference_request_failure[5m]))
+                /
+                (sum(rate(nv_inference_request_success[5m])) + sum(rate(nv_inference_request_failure[5m])))
+              ) * 100 > 1
+            for: 5m
+            labels:
+              severity: critical
+              team: inference
+            annotations:
+              summary: "High inference error rate"
+              description: >
+                Inference error rate is {{ $value | printf "%.2f" }}%
+                (threshold: 1%). Check Triton logs for OOM errors, model
+                failures, or input validation issues.
+              runbook_url: "https://wiki.example.com/runbooks/high-error-rate"
+
+          # -----------------------------------------------------------------
+          # RouterHighLatency
+          # Fires when routing overhead exceeds 10ms P99 for 5 minutes.
+          # The router itself should add minimal latency to the inference path.
+          # -----------------------------------------------------------------
+          - alert: RouterHighLatency
+            expr: >
+              histogram_quantile(0.99,
+                sum(rate(router_routing_overhead_seconds_bucket[5m])) by (le)
+              ) > 0.01
+            for: 5m
+            labels:
+              severity: warning
+              team: platform
+            annotations:
+              summary: "Router overhead is too high"
+              description: >
+                Routing overhead P99 is {{ $value | humanizeDuration }}
+                (threshold: 10ms). Check router CPU, connection pool exhaustion,
+                or DNS resolution issues.
+              runbook_url: "https://wiki.example.com/runbooks/router-high-latency"
+
+      # =====================================================================
+      # GPU Health Alerts
+      # =====================================================================
+      - name: gpu.health
+        rules:
+
+          # -----------------------------------------------------------------
+          # GPUMemoryExhausted
+          # Fires when GPU framebuffer memory exceeds 95% for 2 minutes.
+          # Near-OOM GPUs cause inference failures and model eviction.
+          # -----------------------------------------------------------------
+          - alert: GPUMemoryExhausted
+            expr: >
+              (DCGM_FI_DEV_FB_USED / (DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE)) * 100 > 95
+            for: 2m
+            labels:
+              severity: critical
+              team: infrastructure
+            annotations:
+              summary: "GPU memory nearly exhausted"
+              description: >
+                GPU {{ $labels.gpu }} on node {{ $labels.instance }} is using
+                {{ $value | printf "%.1f" }}% of framebuffer memory
+                (threshold: 95%). Reduce batch sizes, unload unused models,
+                or add GPU capacity.
+              runbook_url: "https://wiki.example.com/runbooks/gpu-memory-exhausted"
+
+          # -----------------------------------------------------------------
+          # GPUTemperatureCritical
+          # Fires when GPU temperature exceeds 85°C for 5 minutes.
+          # Sustained high temps cause thermal throttling and hardware damage.
+          # -----------------------------------------------------------------
+          - alert: GPUTemperatureCritical
+            expr: DCGM_FI_DEV_GPU_TEMP > 85
+            for: 5m
+            labels:
+              severity: critical
+              team: infrastructure
+            annotations:
+              summary: "GPU temperature critically high"
+              description: >
+                GPU {{ $labels.gpu }} on node {{ $labels.instance }} is at
+                {{ $value }}°C (threshold: 85°C). Check cooling system,
+                airflow, and consider reducing workload to prevent thermal
+                throttling or hardware damage.
+              runbook_url: "https://wiki.example.com/runbooks/gpu-temperature-critical"
+
+      # =====================================================================
+      # Backend and Queue Alerts
+      # =====================================================================
+      - name: backend.health
+        rules:
+
+          # -----------------------------------------------------------------
+          # BackendUnhealthy
+          # Fires when any Triton backend is reported unhealthy for 1 minute.
+          # -----------------------------------------------------------------
+          - alert: BackendUnhealthy
+            expr: router_backend_health_status == 0
+            for: 1m
+            labels:
+              severity: critical
+              team: inference
+            annotations:
+              summary: "Inference backend is unhealthy"
+              description: >
+                Backend {{ $labels.backend }} has been unhealthy for more than
+                1 minute. The router has removed it from the load balancing
+                pool. Check the Triton pod logs and GPU status.
+              runbook_url: "https://wiki.example.com/runbooks/backend-unhealthy"
+
+          # -----------------------------------------------------------------
+          # QueueSaturation
+          # Fires when the router queue depth exceeds 1000 for 3 minutes.
+          # Indicates incoming request rate exceeds backend capacity.
+          # -----------------------------------------------------------------
+          - alert: QueueSaturation
+            expr: sum(router_queue_depth) > 1000
+            for: 3m
+            labels:
+              severity: warning
+              team: inference
+            annotations:
+              summary: "Inference queue is saturated"
+              description: >
+                Router queue depth is {{ $value }} (threshold: 1000).
+                Incoming request rate exceeds backend processing capacity.
+                Consider scaling up Triton replicas or enabling autoscaling.
+              runbook_url: "https://wiki.example.com/runbooks/queue-saturation"
+
+          # -----------------------------------------------------------------
+          # TritonModelLoadFailure
+          # Fires when a Triton model reports a load error.
+          # -----------------------------------------------------------------
+          - alert: TritonModelLoadFailure
+            expr: >
+              nv_inference_request_failure{reason="MODEL_UNAVAILABLE"} > 0
+            for: 1m
+            labels:
+              severity: critical
+              team: inference
+            annotations:
+              summary: "Triton model failed to load"
+              description: >
+                Model {{ $labels.model }} failed to load on Triton instance
+                {{ $labels.instance }}. Check the model repository path,
+                model config.pbtxt, and Triton server logs.
+              runbook_url: "https://wiki.example.com/runbooks/triton-model-load-failure"
+---
+# PrometheusRule CRD version (for Prometheus Operator users)
+# Requires: prometheus-operator CRDs installed
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gpu-inference-alerts
+  namespace: monitoring
+  labels:
+    app: distributed-gpu-inference
+    component: prometheus
+    prometheus: gpu-inference
+    # Label for Prometheus Operator to pick up these rules
+    release: prometheus
+spec:
+  groups:
+    - name: inference.performance
+      rules:
+        - alert: HighInferenceLatency
+          expr: >
+            histogram_quantile(0.99,
+              sum(rate(router_request_duration_seconds_bucket[5m])) by (le)
+            ) > 0.5
+          for: 5m
+          labels:
+            severity: warning
+            team: inference
+          annotations:
+            summary: "High inference latency detected"
+            description: "End-to-end P99 inference latency is {{ $value | humanizeDuration }} (threshold: 500ms)."
+
+        - alert: HighErrorRate
+          expr: >
+            (
+              sum(rate(nv_inference_request_failure[5m]))
+              /
+              (sum(rate(nv_inference_request_success[5m])) + sum(rate(nv_inference_request_failure[5m])))
+            ) * 100 > 1
+          for: 5m
+          labels:
+            severity: critical
+            team: inference
+          annotations:
+            summary: "High inference error rate"
+            description: "Inference error rate is {{ $value | printf \"%.2f\" }}% (threshold: 1%)."
+
+        - alert: RouterHighLatency
+          expr: >
+            histogram_quantile(0.99,
+              sum(rate(router_routing_overhead_seconds_bucket[5m])) by (le)
+            ) > 0.01
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Router overhead is too high"
+            description: "Routing overhead P99 is {{ $value | humanizeDuration }} (threshold: 10ms)."
+
+    - name: gpu.health
+      rules:
+        - alert: GPUMemoryExhausted
+          expr: >
+            (DCGM_FI_DEV_FB_USED / (DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE)) * 100 > 95
+          for: 2m
+          labels:
+            severity: critical
+            team: infrastructure
+          annotations:
+            summary: "GPU memory nearly exhausted"
+            description: "GPU {{ $labels.gpu }} on {{ $labels.instance }} at {{ $value | printf \"%.1f\" }}% memory."
+
+        - alert: GPUTemperatureCritical
+          expr: DCGM_FI_DEV_GPU_TEMP > 85
+          for: 5m
+          labels:
+            severity: critical
+            team: infrastructure
+          annotations:
+            summary: "GPU temperature critically high"
+            description: "GPU {{ $labels.gpu }} on {{ $labels.instance }} is at {{ $value }}°C."
+
+    - name: backend.health
+      rules:
+        - alert: BackendUnhealthy
+          expr: router_backend_health_status == 0
+          for: 1m
+          labels:
+            severity: critical
+            team: inference
+          annotations:
+            summary: "Inference backend is unhealthy"
+            description: "Backend {{ $labels.backend }} has been unhealthy for >1 minute."
+
+        - alert: QueueSaturation
+          expr: sum(router_queue_depth) > 1000
+          for: 3m
+          labels:
+            severity: warning
+            team: inference
+          annotations:
+            summary: "Inference queue is saturated"
+            description: "Router queue depth is {{ $value }} (threshold: 1000)."
+
+        - alert: TritonModelLoadFailure
+          expr: nv_inference_request_failure{reason="MODEL_UNAVAILABLE"} > 0
+          for: 1m
+          labels:
+            severity: critical
+            team: inference
+          annotations:
+            summary: "Triton model failed to load"
+            description: "Model {{ $labels.model }} failed on {{ $labels.instance }}."

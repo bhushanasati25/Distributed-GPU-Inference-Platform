@@ -1,0 +1,212 @@
+# =============================================================================
+# Redis Deployment for Inference Cache and State
+# =============================================================================
+# Deploys Redis 7 as a single-replica deployment with persistent storage.
+# Used by the inference router for response caching, session state, and
+# distributed coordination. A ConfigMap provides a tuned redis.conf.
+# =============================================================================
+
+# Redis configuration ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: data
+  labels:
+    app: distributed-gpu-inference
+    component: redis
+  annotations:
+    description: "Redis server configuration tuned for inference caching"
+data:
+  redis.conf: |
+    # ==========================================================================
+    # Redis Configuration for Distributed GPU Inference Platform
+    # ==========================================================================
+
+    # Network
+    bind 0.0.0.0
+    port 6379
+    tcp-backlog 511
+    timeout 0
+    tcp-keepalive 300
+
+    # Memory Management
+    # Maximum memory Redis can use (768MB with 256MB headroom for overhead)
+    maxmemory 768mb
+    # Evict least-recently-used keys first (good for caching workloads)
+    maxmemory-policy allkeys-lru
+    # Sample 10 keys for LRU approximation (higher = more accurate but slower)
+    maxmemory-samples 10
+
+    # Persistence (AOF for durability)
+    appendonly yes
+    appendfsync everysec
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 64mb
+
+    # RDB snapshots as backup
+    save 900 1
+    save 300 10
+    save 60 10000
+    rdbcompression yes
+    rdbchecksum yes
+    dbfilename dump.rdb
+    dir /data
+
+    # Logging
+    loglevel notice
+
+    # Slow log (track commands taking > 10ms)
+    slowlog-log-slower-than 10000
+    slowlog-max-len 128
+
+    # Security: disable dangerous commands in production
+    # rename-command FLUSHALL ""
+    # rename-command FLUSHDB ""
+    # rename-command CONFIG ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: data
+  labels:
+    app: distributed-gpu-inference
+    component: redis
+  annotations:
+    description: "Redis 7 for inference response caching and router state"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: distributed-gpu-inference
+      component: redis
+  strategy:
+    type: Recreate  # Recreate to avoid PVC conflicts
+  template:
+    metadata:
+      labels:
+        app: distributed-gpu-inference
+        component: redis
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9121"
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+
+          command:
+            - redis-server
+            - /etc/redis/redis.conf
+
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+            - name: redis-config
+              mountPath: /etc/redis
+              readOnly: true
+
+        # Redis Exporter sidecar for Prometheus metrics
+        - name: redis-exporter
+          image: oliver006/redis_exporter:v1.56.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: metrics
+              containerPort: 9121
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+
+      volumes:
+        - name: redis-config
+          configMap:
+            name: redis-config
+        - name: redis-data
+          persistentVolumeClaim:
+            claimName: redis-data
+
+---
+# PVC for Redis persistence
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: data
+  labels:
+    app: distributed-gpu-inference
+    component: redis
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  # storageClassName: fast-ssd
+
+---
+# Redis Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: data
+  labels:
+    app: distributed-gpu-inference
+    component: redis
+  annotations:
+    description: "Redis service for inference caching and state management"
+spec:
+  type: ClusterIP
+  selector:
+    app: distributed-gpu-inference
+    component: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+      protocol: TCP
+    - name: metrics
+      port: 9121
+      targetPort: 9121
+      protocol: TCP

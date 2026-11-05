@@ -1,0 +1,15 @@
+# =============================================================================
+# Kustomize Base Configuration
+# =============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+labels:
+  - pairs:
+      app: distributed-gpu-inference
+      managed-by: kustomize
+
+resources:
+  - triton-deployment.yaml
+  - triton-service.yaml
+  - gpu-resource-quota.yaml

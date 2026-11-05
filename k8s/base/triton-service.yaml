@@ -1,0 +1,69 @@
+# =============================================================================
+# Triton Inference Server Services
+# =============================================================================
+# Two services are defined:
+#   1. ClusterIP service for internal routing to Triton pods
+#   2. Headless service for StatefulSet DNS-based pod discovery
+# =============================================================================
+
+# ClusterIP Service — used by the inference router to send requests to Triton
+apiVersion: v1
+kind: Service
+metadata:
+  name: triton-inference-server
+  namespace: inference
+  labels:
+    app: distributed-gpu-inference
+    component: triton
+  annotations:
+    description: "ClusterIP service for routing inference requests to Triton pods"
+spec:
+  type: ClusterIP
+  selector:
+    app: distributed-gpu-inference
+    component: triton
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+    - name: grpc
+      port: 8001
+      targetPort: 8001
+      protocol: TCP
+    - name: metrics
+      port: 8002
+      targetPort: 8002
+      protocol: TCP
+---
+# Headless Service — provides stable DNS names for each StatefulSet pod
+# (e.g., triton-inference-server-0.triton-inference-server-headless.inference.svc)
+apiVersion: v1
+kind: Service
+metadata:
+  name: triton-inference-server-headless
+  namespace: inference
+  labels:
+    app: distributed-gpu-inference
+    component: triton
+  annotations:
+    description: "Headless service for StatefulSet pod DNS discovery"
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: distributed-gpu-inference
+    component: triton
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+    - name: grpc
+      port: 8001
+      targetPort: 8001
+      protocol: TCP
+    - name: metrics
+      port: 8002
+      targetPort: 8002
+      protocol: TCP

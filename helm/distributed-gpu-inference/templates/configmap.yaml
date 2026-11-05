@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "distributed-gpu-inference.fullname" . }}-config
+  labels:
+    {{- include "distributed-gpu-inference.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    server:
+      grpc_port: {{ .Values.router.service.grpcPort }}
+      http_port: {{ .Values.router.service.httpPort }}
+      metrics_port: {{ .Values.router.service.metricsPort }}
+      read_timeout: 10s
+      write_timeout: 10s
+      log_level: "info"
+
+    backends:
+      {{- range $i := until (int .Values.triton.replicaCount) }}
+      - address: "{{ include "distributed-gpu-inference.fullname" $ }}-triton-{{ $i }}.{{ include "distributed-gpu-inference.fullname" $ }}-triton-svc:8001"
+        node_pool: "gpu-pool-{{ add1 (mod $i 4) }}"
+        gpu_type: "NVIDIA-GPU"
+        max_concurrent: 64
+        weight: 10
+      {{- end }}
+
+    load_balancing:
+      algorithm: "{{ .Values.router.loadBalancing.algorithm }}"
+      alpha: {{ .Values.router.loadBalancing.alpha }}
+      beta: {{ .Values.router.loadBalancing.beta }}
+      gamma: {{ .Values.router.loadBalancing.gamma }}
+
+    queue:
+      max_depth: {{ .Values.router.queue.maxDepth }}
+      default_timeout: {{ .Values.router.queue.defaultTimeout }}
+

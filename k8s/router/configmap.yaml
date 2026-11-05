@@ -1,0 +1,159 @@
+# =============================================================================
+# Inference Router ConfigMap
+# =============================================================================
+# Contains the main router configuration (config.yaml) and auxiliary settings.
+# The config.yaml defines backend discovery, routing strategies, queue limits,
+# health check parameters, and observability settings.
+# =============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: router-config
+  namespace: inference
+  labels:
+    app: distributed-gpu-inference
+    component: router
+  annotations:
+    description: "Router configuration including backend discovery, routing, and queue settings"
+data:
+  # Log level for the router (debug, info, warn, error)
+  log_level: "info"
+
+  # Comma-separated list of Triton backend addresses for static discovery
+  triton_backends: "triton-inference-server-0.triton-inference-server-headless.inference.svc.cluster.local:8001,triton-inference-server-1.triton-inference-server-headless.inference.svc.cluster.local:8001,triton-inference-server-2.triton-inference-server-headless.inference.svc.cluster.local:8001,triton-inference-server-3.triton-inference-server-headless.inference.svc.cluster.local:8001,triton-inference-server-4.triton-inference-server-headless.inference.svc.cluster.local:8001,triton-inference-server-5.triton-inference-server-headless.inference.svc.cluster.local:8001,triton-inference-server-6.triton-inference-server-headless.inference.svc.cluster.local:8001,triton-inference-server-7.triton-inference-server-headless.inference.svc.cluster.local:8001"
+
+  # Full router configuration file
+  config.yaml: |
+    # ==========================================================================
+    # Distributed GPU Inference Router Configuration
+    # ==========================================================================
+
+    server:
+      # gRPC server settings
+      grpc:
+        port: 50051
+        max_concurrent_streams: 1000
+        max_recv_msg_size_mb: 64
+        max_send_msg_size_mb: 64
+        keepalive_time_seconds: 30
+        keepalive_timeout_seconds: 10
+
+      # HTTP server settings (health checks, metrics, admin API)
+      http:
+        port: 8080
+        read_timeout_seconds: 30
+        write_timeout_seconds: 30
+
+      # Prometheus metrics endpoint
+      metrics:
+        port: 9090
+        path: /metrics
+
+    # ---------- Backend Discovery ----------
+    backends:
+      # How backends are discovered: "static", "dns", or "kubernetes"
+      discovery_method: kubernetes
+
+      # Kubernetes-based discovery settings
+      kubernetes:
+        namespace: inference
+        label_selector: "app=distributed-gpu-inference,component=triton"
+        port_name: grpc
+        resync_interval_seconds: 30
+
+      # Fallback static backend list (used when discovery_method=static)
+      static_backends: []
+
+      # Connection pool settings per backend
+      connection_pool:
+        max_connections_per_backend: 10
+        max_idle_connections: 5
+        connection_timeout_seconds: 5
+        idle_timeout_seconds: 300
+
+      # Health checking for backends
+      health_check:
+        enabled: true
+        interval_seconds: 10
+        timeout_seconds: 5
+        unhealthy_threshold: 3
+        healthy_threshold: 2
+        protocol: grpc
+        endpoint: "triton.GRPCInferenceService/ServerReady"
+
+    # ---------- Routing Strategy ----------
+    routing:
+      # Strategy: "round_robin", "least_loaded", "latency_aware", "random"
+      strategy: least_loaded
+
+      # Least-loaded specific settings
+      least_loaded:
+        # How to measure load: "queue_depth", "gpu_utilization", "active_requests"
+        load_metric: queue_depth
+        # Re-evaluate load metrics at this interval
+        refresh_interval_seconds: 5
+
+      # Latency-aware specific settings
+      latency_aware:
+        # Weight factor for latency in routing decisions (0.0-1.0)
+        latency_weight: 0.7
+        # Exponential moving average decay factor
+        ema_decay: 0.3
+        # Window size for latency tracking
+        window_size: 100
+
+      # Model-specific routing overrides
+      model_routing:
+        # Pin specific models to specific backend pools
+        # pinned_models:
+        #   large-llm: [0, 1]
+        #   vision-model: [2, 3]
+
+    # ---------- Queue Management ----------
+    queue:
+      # Maximum number of requests in the global queue
+      max_queue_depth: 5000
+      # Maximum time a request can wait in the queue
+      max_queue_wait_seconds: 30
+      # Enable priority queuing (requests can specify priority)
+      priority_enabled: true
+      # Number of priority levels (1 = highest)
+      priority_levels: 3
+
+    # ---------- Rate Limiting ----------
+    rate_limiting:
+      enabled: true
+      # Global requests per second limit
+      global_rps: 10000
+      # Per-client RPS limit (identified by API key or IP)
+      per_client_rps: 1000
+      # Burst allowance above the steady-state RPS
+      burst_size: 100
+
+    # ---------- Retry and Circuit Breaker ----------
+    resilience:
+      retry:
+        max_retries: 2
+        backoff_base_ms: 100
+        backoff_max_ms: 2000
+        retryable_status_codes: [14]  # UNAVAILABLE
+
+      circuit_breaker:
+        enabled: true
+        # Number of consecutive failures to trip the breaker
+        failure_threshold: 5
+        # Time before attempting to close the circuit
+        reset_timeout_seconds: 30
+        # Percentage of requests to allow through when half-open
+        half_open_max_requests: 3
+
+    # ---------- Observability ----------
+    observability:
+      log_level: info
+      # Log format: "json" or "text"
+      log_format: json
+      # Enable request/response logging (heavy — disable in prod)
+      request_logging: false
+      # Trace sampling rate (0.0-1.0)
+      trace_sample_rate: 0.01

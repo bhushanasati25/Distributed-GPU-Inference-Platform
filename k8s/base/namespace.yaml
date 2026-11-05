@@ -1,0 +1,44 @@
+# =============================================================================
+# Namespace Definitions for Distributed GPU Inference Platform
+# =============================================================================
+# Three namespaces provide logical isolation for different platform components:
+#   - inference: Triton inference servers, routers, and related workloads
+#   - monitoring: Prometheus, Grafana, alerting, and DCGM exporters
+#   - data: MinIO object storage, Redis cache, and data pipeline jobs
+# =============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: inference
+  labels:
+    app: distributed-gpu-inference
+    component: inference
+    platform: gpu-inference
+    environment: shared
+  annotations:
+    description: "Namespace for GPU inference servers, routers, and inference workloads"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app: distributed-gpu-inference
+    component: monitoring
+    platform: gpu-inference
+    environment: shared
+  annotations:
+    description: "Namespace for Prometheus, Grafana, DCGM exporter, and alerting"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: data
+  labels:
+    app: distributed-gpu-inference
+    component: data
+    platform: gpu-inference
+    environment: shared
+  annotations:
+    description: "Namespace for MinIO object storage, Redis cache, and data pipelines"

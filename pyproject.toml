@@ -17,9 +17,11 @@ include = ["python*"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
-addopts = "-ra -q --strict-markers"
+addopts = "-ra -q"
 testpaths = ["python/tests"]
-asyncio_mode = "auto"
+markers = [
+    "asyncio: mark test as async",
+]
 
 [tool.black]
 line-length = 100

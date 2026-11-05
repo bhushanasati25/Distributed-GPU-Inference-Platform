@@ -26,5 +26,6 @@ prometheus-client>=0.19.0
 # Testing & Benchmarking
 pytest>=7.4.0
 pytest-cov>=4.1.0
+pytest-asyncio>=0.21.0
 locust>=2.18.0
 

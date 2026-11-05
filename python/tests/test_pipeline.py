@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 import numpy as np
 import pytest
+import pyarrow.parquet as pq
 
 from python.data_pipeline.sharding import DatasetSharder, ShardInfo
 from python.data_pipeline.data_loader import DistributedDataLoader, BatchData
@@ -95,7 +96,8 @@ def test_image_preprocessing(synthetic_image_dir: Path, temp_dir: Path):
         output_dir=out_dir,
         target_size=(32, 32),
         normalize=True,
-        num_workers=2
+        num_workers=2,
+        output_format="parquet",
     )
     
     assert len(out_files) > 0

@@ -82,6 +82,33 @@ class OutputFormatError(PreprocessingError):
     """Raised for unsupported or misconfigured output formats."""
 
 
+@dataclass
+class TabularSchema:
+    """Schema specification for tabular data preprocessing."""
+    columns: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
+
+class PreprocessingResult(dict):
+    """Result summary dictionary that also allows indexing output files as a list."""
+    def __init__(self, summary: Dict[str, Any], output_files: List[str]):
+        super().__init__(summary)
+        self.output_files = output_files
+        self["output_files"] = output_files
+
+    def __len__(self) -> int:
+        return len(self.output_files) if self.output_files else super().__len__()
+
+    def __getitem__(self, item: Any) -> Any:
+        if isinstance(item, int):
+            return self.output_files[item]
+        return super().__getitem__(item)
+
+    def __iter__(self):
+        if self.output_files:
+            return iter(self.output_files)
+        return super().__iter__()
+
+
 # ---------------------------------------------------------------------------
 # Checkpoint helper
 # ---------------------------------------------------------------------------
@@ -382,7 +409,12 @@ class DataPreprocessor:
             "Image preprocessing complete: %d ok, %d errors in %.1f s (%.0f img/s).",
             total_success, total_errors, elapsed, summary["images_per_sec"],
         )
-        return summary
+        out_files = sorted([
+            os.path.join(output_dir, f)
+            for f in os.listdir(output_dir)
+            if not f.startswith(".") and not f.endswith(".json") and not f.endswith(".tmp")
+        ])
+        return PreprocessingResult(summary, out_files)
 
     # ------------------------------------------------------------------ #
     # Text preprocessing
@@ -512,7 +544,7 @@ class DataPreprocessor:
         self,
         input_path: str,
         output_path: str,
-        schema: Dict[str, Dict[str, Any]],
+        schema: Union[Dict[str, Dict[str, Any]], TabularSchema],
         num_workers: int = 4,
         batch_size: int = 10_000,
         output_format: str = "parquet",
@@ -546,6 +578,9 @@ class DataPreprocessor:
             FileNotFoundError:   If *input_path* does not exist.
             DataValidationError: On schema violations.
         """
+        if isinstance(schema, TabularSchema):
+            schema = schema.columns
+
         import pandas as pd  # type: ignore[import-untyped]
         import pyarrow as pa  # type: ignore[import-untyped]
         import pyarrow.parquet as pq  # type: ignore[import-untyped]

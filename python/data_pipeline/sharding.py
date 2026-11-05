@@ -202,31 +202,39 @@ class DatasetSharder:
             pf = pq.ParquetFile(p)
             for rg_idx in range(pf.num_row_groups):
                 rg_table = pf.read_row_group(rg_idx)
-                rg_rows = rg_table.num_rows
+                while rg_table.num_rows > 0:
+                    space_in_current = rows_per_shard - current_shard_rows
+                    if space_in_current <= 0 and current_shard_idx < num_shards - 1:
+                        current_writer.close()
+                        size = current_shard_path.stat().st_size
+                        checksum = self._compute_sha256(current_shard_path)
+                        created_shards.append(ShardInfo(
+                            shard_id=f"shard_{current_shard_idx:05d}",
+                            filename=current_shard_path.name,
+                            file_path=str(current_shard_path.resolve()),
+                            size_bytes=size,
+                            row_count=current_shard_rows,
+                            checksum_sha256=checksum
+                        ))
+                        logger.info("Completed %s: %d rows, %.2f MB",
+                                    current_shard_path.name, current_shard_rows, size / (1024**2))
 
-                # If writing this group exceeds target shard capacity and not on last shard
-                if (current_shard_rows + rg_rows > rows_per_shard) and (current_shard_idx < num_shards - 1):
-                    current_writer.close()
-                    size = current_shard_path.stat().st_size
-                    checksum = self._compute_sha256(current_shard_path)
-                    created_shards.append(ShardInfo(
-                        shard_id=f"shard_{current_shard_idx:05d}",
-                        filename=current_shard_path.name,
-                        file_path=str(current_shard_path.resolve()),
-                        size_bytes=size,
-                        row_count=current_shard_rows,
-                        checksum_sha256=checksum
-                    ))
-                    logger.info("Completed %s: %d rows, %.2f MB",
-                                current_shard_path.name, current_shard_rows, size / (1024**2))
+                        current_shard_idx += 1
+                        current_shard_rows = 0
+                        current_writer, current_shard_path = _open_shard(current_shard_idx)
+                        space_in_current = rows_per_shard
 
-                    current_shard_idx += 1
-                    current_shard_rows = 0
-                    current_writer, current_shard_path = _open_shard(current_shard_idx)
+                    if current_shard_idx == num_shards - 1:
+                        chunk = rg_table
+                        rg_table = rg_table.slice(0, 0)
+                    else:
+                        chunk_len = min(space_in_current, rg_table.num_rows)
+                        chunk = rg_table.slice(0, chunk_len)
+                        rg_table = rg_table.slice(chunk_len)
 
-                current_writer.write_table(rg_table)
-                current_shard_rows += rg_rows
-                processed_rows += rg_rows
+                    current_writer.write_table(chunk)
+                    current_shard_rows += chunk.num_rows
+                    processed_rows += chunk.num_rows
 
         # Close final shard
         if current_writer:

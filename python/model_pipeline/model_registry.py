@@ -145,6 +145,10 @@ class ModelInfo:
     storage_path: Optional[str] = None
 
 
+#: Alias for ModelInfo used across the platform test suites and APIs.
+ModelMetadata = ModelInfo
+
+
 # ---------------------------------------------------------------------------
 # ModelRegistry
 # ---------------------------------------------------------------------------
@@ -169,9 +173,11 @@ class ModelRegistry:
         self,
         model_name: str,
         version: int,
-        engine_path: str,
-        config: Dict[str, Any],
+        engine_path: Optional[Union[str, Path]] = None,
+        config: Optional[Dict[str, Any]] = None,
         force: bool = False,
+        model_file_path: Optional[Union[str, Path]] = None,
+        repo_dir: Optional[Union[str, Path]] = None,
     ) -> ModelInfo:
         """Register a model version in the Triton model repository.
 
@@ -183,13 +189,15 @@ class ModelRegistry:
                     model.plan  (or model.onnx etc.)
 
         Args:
-            model_name:  Triton model name.
-            version:     Integer version number (≥ 1).
-            engine_path: Path to the compiled engine / model file.
-            config:      Dict with keys: ``platform``, ``max_batch_size``,
-                         ``inputs`` (list of dicts), ``outputs`` (list of dicts).
-                         Optionally ``dynamic_batching`` (dict) and ``instance_group``.
-            force:       If *True*, overwrite an existing version.
+            model_name:       Triton model name.
+            version:          Integer version number (≥ 1).
+            engine_path:      Path to the compiled engine / model file.
+            config:           Dict with keys: ``platform``, ``max_batch_size``,
+                              ``inputs`` (list of dicts), ``outputs`` (list of dicts).
+                              Optionally ``dynamic_batching`` (dict) and ``instance_group``.
+            force:            If *True*, overwrite an existing version.
+            model_file_path:  Alias for engine_path.
+            repo_dir:         Optional override for local repository root.
 
         Returns:
             :class:`ModelInfo` describing the registered model.
@@ -199,10 +207,14 @@ class ModelRegistry:
             ModelAlreadyExistsError:   If the version exists and *force* is False.
             InvalidPlatformError:      If the platform is unsupported.
         """
-        engine_path = os.path.abspath(engine_path)
-        if not os.path.exists(engine_path):
-            raise FileNotFoundError(f"Engine file not found: {engine_path}")
+        raw_path = engine_path if engine_path is not None else model_file_path
+        if raw_path is None:
+            raise ValueError("Either engine_path or model_file_path must be specified.")
+        engine_path_str = os.path.abspath(str(raw_path))
+        if not os.path.exists(engine_path_str):
+            raise FileNotFoundError(f"Engine file not found: {engine_path_str}")
 
+        config = config or {}
         platform = config.get("platform", "")
         if platform not in PLATFORM_MODEL_FILE:
             raise InvalidPlatformError(
@@ -210,7 +222,10 @@ class ModelRegistry:
                 f"Supported: {list(PLATFORM_MODEL_FILE.keys())}"
             )
 
-        model_dir = os.path.join(self._repo_root, model_name)
+        base_repo = os.path.abspath(str(repo_dir)) if repo_dir is not None else self._repo_root
+        os.makedirs(base_repo, exist_ok=True)
+
+        model_dir = os.path.join(base_repo, model_name)
         version_dir = os.path.join(model_dir, str(version))
         model_filename = PLATFORM_MODEL_FILE[platform]
         dest_model = os.path.join(version_dir, model_filename)
@@ -224,13 +239,13 @@ class ModelRegistry:
         os.makedirs(version_dir, exist_ok=True)
 
         # Copy engine file.
-        if os.path.isdir(engine_path):
+        if os.path.isdir(engine_path_str):
             # e.g. tensorflow_savedmodel is a directory
             if os.path.exists(dest_model):
                 shutil.rmtree(dest_model)
-            shutil.copytree(engine_path, dest_model)
+            shutil.copytree(engine_path_str, dest_model)
         else:
-            shutil.copy2(engine_path, dest_model)
+            shutil.copy2(engine_path_str, dest_model)
         logger.info("Copied engine to %s", dest_model)
 
         # Generate config.pbtxt
@@ -270,8 +285,9 @@ class ModelRegistry:
         inputs: List[Dict[str, Any]],
         outputs: List[Dict[str, Any]],
         max_batch_size: int = 0,
-        dynamic_batching: Optional[Dict[str, Any]] = None,
+        dynamic_batching: Optional[Union[Dict[str, Any], bool]] = None,
         instance_group: Optional[List[Dict[str, Any]]] = None,
+        **kwargs: Any,
     ) -> str:
         """Generate a Triton ``config.pbtxt`` string.
 
@@ -282,8 +298,9 @@ class ModelRegistry:
                               ``data_type``, ``dims`` keys).
             outputs:          List of output tensor specs.
             max_batch_size:   Maximum batch size (0 for explicit-batch models).
-            dynamic_batching: Optional dynamic batching config dict.
+            dynamic_batching: Optional dynamic batching config dict or boolean.
             instance_group:   Optional instance group list.
+            **kwargs:         Additional options, e.g. max_queue_delay_microseconds.
 
         Returns:
             The ``config.pbtxt`` content as a string.
@@ -325,11 +342,21 @@ class ModelRegistry:
             lines.append("")
 
         # Dynamic batching
-        if dynamic_batching is not None:
+        if dynamic_batching:
+            if isinstance(dynamic_batching, bool):
+                dynamic_dict = {
+                    "preferred_batch_size": kwargs.get("preferred_batch_size", [4, 8, 16]),
+                    "max_queue_delay_microseconds": kwargs.get("max_queue_delay_microseconds", 100),
+                    "preserve_ordering": kwargs.get("preserve_ordering", False),
+                }
+            else:
+                dynamic_dict = dict(dynamic_batching)
+                if "max_queue_delay_microseconds" in kwargs:
+                    dynamic_dict["max_queue_delay_microseconds"] = kwargs["max_queue_delay_microseconds"]
             dbc = DynamicBatchingConfig(
-                preferred_batch_size=dynamic_batching.get("preferred_batch_size", [4, 8, 16]),
-                max_queue_delay_microseconds=dynamic_batching.get("max_queue_delay_microseconds", 100),
-                preserve_ordering=dynamic_batching.get("preserve_ordering", False),
+                preferred_batch_size=dynamic_dict.get("preferred_batch_size", [4, 8, 16]),
+                max_queue_delay_microseconds=dynamic_dict.get("max_queue_delay_microseconds", 100),
+                preserve_ordering=dynamic_dict.get("preserve_ordering", False),
             )
             lines.append(dbc.to_pbtxt())
             lines.append("")

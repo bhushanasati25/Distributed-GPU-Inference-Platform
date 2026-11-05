@@ -68,6 +68,11 @@ func (b *Backend) AvgLatency() time.Duration {
 	return time.Duration(ns)
 }
 
+// SetLatency sets average latency directly without EMA decay.
+func (b *Backend) SetLatency(d time.Duration) {
+	atomic.StoreInt64(&b.avgLatencyNs, d.Nanoseconds())
+}
+
 // UpdateLatency applies exponential moving average (EMA) smoothing to latency tracking.
 func (b *Backend) UpdateLatency(d time.Duration) {
 	const decay = 0.2 // Weight given to newest observation

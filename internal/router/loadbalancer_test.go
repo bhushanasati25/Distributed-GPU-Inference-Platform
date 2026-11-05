@@ -12,10 +12,11 @@ func TestLatencyAwareBalancerSelection(t *testing.T) {
 	b2 := NewBackend("10.0.0.2:8001", "gpu-pool-2", "A100", 64, 1)
 	b3 := NewBackend("10.0.0.3:8001", "gpu-pool-3", "H100", 128, 2)
 
-	// Simulate load: b1 has high latency, b2 is idle, b3 has active requests
-	b1.UpdateLatency(100 * time.Millisecond)
-	b2.UpdateLatency(5 * time.Millisecond)
-	b3.UpdateLatency(10 * time.Millisecond)
+	// Simulate load: b1 has high latency, b2 is idle and low latency, b3 has load
+	b1.SetLatency(100 * time.Millisecond)
+	b2.SetLatency(2 * time.Millisecond)
+	b3.SetLatency(20 * time.Millisecond)
+	b3.IncActive()
 
 	balancer := NewLatencyAwareBalancer(0.4, 0.4, 0.2)
 	req := &pb.InferenceRequest{ModelName: "resnet50"}
@@ -33,7 +34,7 @@ func TestLatencyAwareBalancerSelection(t *testing.T) {
 	b2.IncActive()
 	b2.IncActive()
 	b2.IncActive()
-	b2.UpdateLatency(50 * time.Millisecond)
+	b2.SetLatency(80 * time.Millisecond)
 
 	// b3 has lower latency (10ms) and higher weight (2) -> b3 should be preferred
 	selected2, err := balancer.SelectBackend(req, []*Backend{b1, b2, b3})

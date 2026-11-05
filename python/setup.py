@@ -10,7 +10,7 @@ setup(
     version="1.0.0",
     description="Distributed GPU Inference Platform Model & Data Pipeline",
     author="Platform Engineering",
-    packages=find_packages(),
+    packages=find_packages(include=["python", "python.*"]),
     python_requires=">=3.9",
     install_requires=[
         "numpy>=1.24.0",

@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application source
 COPY python /app/python
-COPY setup.py* /app/
+COPY setup.py* pyproject.toml* /app/
 
 # Install package
 RUN pip install -e .

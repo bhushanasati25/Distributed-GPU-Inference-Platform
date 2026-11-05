@@ -11,6 +11,10 @@ license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.9"
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["python*"]
+
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = "-ra -q --strict-markers"
@@ -24,3 +28,4 @@ target-version = ['py311']
 [tool.isort]
 profile = "black"
 line_length = 100
+

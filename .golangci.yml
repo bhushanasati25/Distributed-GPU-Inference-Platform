@@ -16,3 +16,4 @@ linters:
 issues:
   exclude-dirs:
     - pkg/proto
+

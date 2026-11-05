@@ -16,3 +16,4 @@ We take the security of this platform seriously. If you discover a vulnerability
    - Minimal reproduction steps or proof-of-concept payload.
    - Any suggested remediations or workarounds.
 3. **Response Time**: We will acknowledge receipt within 48 hours and provide regular updates until a patch is issued.
+

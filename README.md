@@ -2,6 +2,7 @@
 
 <div align="center">
 
+[![CI Pipeline](https://github.com/bhushanasati25/Distributed-GPU-Inference-Platform/actions/workflows/ci.yaml/badge.svg)](https://github.com/bhushanasati25/Distributed-GPU-Inference-Platform/actions/workflows/ci.yaml)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-1.28%2B-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io/)
 [![NVIDIA Triton](https://img.shields.io/badge/NVIDIA%20Triton-24.01-76B900?style=for-the-badge&logo=nvidia&logoColor=white)](https://developer.nvidia.com/nvidia-triton-inference-server)
 [![TensorRT](https://img.shields.io/badge/TensorRT-8.6%2B%20FP16%2FINT8-76B900?style=for-the-badge&logo=nvidia&logoColor=white)](https://developer.nvidia.com/tensorrt)

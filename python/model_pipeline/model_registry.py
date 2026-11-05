@@ -160,9 +160,16 @@ class ModelRegistry:
         repo_root: Root directory of the local model repository.
     """
 
-    def __init__(self, repo_root: str = "/models") -> None:
+    def __init__(self, repo_root: Optional[str] = None) -> None:
+        if repo_root is None:
+            repo_root = os.getenv("TRITON_MODEL_REPO", "./models")
         self._repo_root = os.path.abspath(repo_root)
-        os.makedirs(self._repo_root, exist_ok=True)
+        try:
+            os.makedirs(self._repo_root, exist_ok=True)
+        except (PermissionError, OSError):
+            fallback = os.path.join(os.getenv("TMPDIR", "/tmp"), "models")
+            self._repo_root = os.path.abspath(fallback)
+            os.makedirs(self._repo_root, exist_ok=True)
         logger.info("Model registry initialised at %s", self._repo_root)
 
     # ------------------------------------------------------------------ #

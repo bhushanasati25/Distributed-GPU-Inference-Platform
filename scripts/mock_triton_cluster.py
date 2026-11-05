@@ -122,7 +122,7 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
 
 
-def start_node(node_cfg: dict, base_port: int) -> ThreadingHTTPServer:
+def start_node(node_cfg: dict, base_port: int, host: str = "0.0.0.0") -> ThreadingHTTPServer:
     port = base_port + node_cfg["http_offset"]
     
     # Custom handler class per node
@@ -131,14 +131,15 @@ def start_node(node_cfg: dict, base_port: int) -> ThreadingHTTPServer:
         is_healthy = True
         injected_latency_ms = 0.0
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), NodeHandler)
-    logger.info("Initialized %s (%s, %s) on http://127.0.0.1:%d",
-                node_cfg["name"], node_cfg["pool"], node_cfg["gpu"], port)
+    server = ThreadingHTTPServer((host, port), NodeHandler)
+    logger.info("Initialized %s (%s, %s) on http://%s:%d",
+                node_cfg["name"], node_cfg["pool"], node_cfg["gpu"], host, port)
     return server
 
 
 def main():
     parser = argparse.ArgumentParser(description="Mock 4-Pool Triton Cluster")
+    parser.add_argument("--host", default="0.0.0.0", help="Host address to bind HTTP servers")
     parser.add_argument("--base-port", type=int, default=8100, help="Base HTTP port for pool instances")
     args = parser.parse_args()
 
@@ -146,7 +147,7 @@ def main():
     threads: List[threading.Thread] = []
 
     for spec in CLUSTER_SPEC:
-        srv = start_node(spec, args.base_port)
+        srv = start_node(spec, args.base_port, host=args.host)
         servers.append(srv)
         t = threading.Thread(target=srv.serve_forever, daemon=True)
         t.start()

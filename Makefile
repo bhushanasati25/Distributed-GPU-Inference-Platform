@@ -104,6 +104,20 @@ shard-data: ## Execute sample dataset sharding pipeline
 		--output /tmp/shards \
 		--num-shards 8
 
+.PHONY: compose-up
+compose-up: ## Start full local stack (Router, Mock Triton, Prometheus, Grafana, Jaeger, Redis, MinIO)
+	@echo ">>> Starting full local Docker Compose stack..."
+	docker compose up -d
+
+.PHONY: compose-down
+compose-down: ## Stop full local Docker Compose stack and remove volumes
+	@echo ">>> Stopping Docker Compose stack..."
+	docker compose down -v
+
+.PHONY: compose-logs
+compose-logs: ## Tail logs from all Docker Compose services
+	docker compose logs -f
+
 .PHONY: clean
 clean: ## Clean build binaries and temp files
 	@echo ">>> Cleaning build artifacts..."

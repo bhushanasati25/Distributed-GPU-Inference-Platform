@@ -354,8 +354,29 @@ Benchmarking 100,000 requests across 200 concurrent threads against 4 GPU pools 
 ### Prerequisites
 * Go 1.21+
 * Python 3.9+
-* Docker & Kubernetes (Kind / GKE / EKS)
+* Docker & Docker Compose (or Kubernetes: Kind / GKE / EKS)
 * Helm 3.x (optional for Helm deployment)
+
+### 0. Full-Stack Local Docker Compose Stack
+Launch the complete distributed platform including monitoring and tracing in one command:
+```bash
+make compose-up
+# Or: docker compose up -d
+```
+
+| Service | Port | Endpoint / Credentials | Description |
+| :--- | :--- | :--- | :--- |
+| **Inference Router & Console** | `8080` / `50051` | [http://localhost:8080](http://localhost:8080) | Web management console & gRPC server |
+| **Grafana Dashboards** | `3000` | [http://localhost:3000](http://localhost:3000) (`admin`/`admin`) | All 4 dashboards pre-provisioned |
+| **Jaeger Distributed Tracing** | `16686` | [http://localhost:16686](http://localhost:16686) | OTLP timeline trace visualizer |
+| **Prometheus Metrics** | `9090` | [http://localhost:9090](http://localhost:9090) | Time-series scraper and query UI |
+| **MinIO S3 Model Store** | `9001` | [http://localhost:9001](http://localhost:9001) (`minioadmin`/`minioadmin`) | Object storage for model registry |
+| **Mock Triton Cluster** | `8100-8107` | [http://localhost:8100](http://localhost:8100) | 8 simulated instances across 4 GPU pools |
+
+To terminate the stack and clean up volumes:
+```bash
+make compose-down
+```
 
 ### 1. Run the One-Click Platform Demonstration
 Experience the complete system locally without physical GPU hardware:
@@ -544,7 +565,9 @@ distributed-gpu-inference/
 ├── docs/                            # In-depth technical whitepapers & runbooks
 │   ├── ARCHITECTURE.md              # System design & mathematical proofs
 │   ├── BENCHMARK_RESULTS.md         # Comprehensive empirical test report
+│   ├── DEPLOYMENT_GUIDE.md          # Multi-cloud production deployment & operations runbook
 │   └── TROUBLESHOOTING.md           # SRE / MLOps operational runbook
+├── docker-compose.yaml              # Single-command local full-stack environment
 ├── .github/workflows/ci.yaml        # Automated GitHub Actions CI/CD pipeline
 ├── config.yaml                      # 4-cluster routing configuration
 ├── Makefile                         # 18 automated targets (build, test, deploy, demo)
@@ -561,6 +584,9 @@ Run `make help` for the interactive menu:
 
 | Target | Description |
 | :--- | :--- |
+| `make compose-up` | Start full local stack (Router, Mock Triton, Prometheus, Grafana, Jaeger, Redis, MinIO) |
+| `make compose-down` | Stop full local Docker Compose stack and remove volumes |
+| `make compose-logs` | Tail real-time logs from all running Docker Compose services |
 | `make build` | Compile Go router (`bin/inference-router`) and CLI (`bin/dist-inf`) binaries |
 | `make demo` | Execute the automated end-to-end platform demonstration |
 | `make run` | Launch the Go router locally with `config.yaml` |

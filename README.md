@@ -22,7 +22,7 @@
 [Data Pipeline](#10tb-streaming-data-pipeline) •
 [Observability](#observability--dashboards) •
 [Quickstart](#quickstart--hands-on-demo) •
-[CLI Reference](#developer--operator-cli-dist-inf) •
+[Interview Defense Guide](docs/INTERVIEW_GUIDE.md) •
 [Repository Layout](#repository-structure)
 
 </div>
@@ -566,6 +566,7 @@ distributed-gpu-inference/
 │   ├── ARCHITECTURE.md              # System design & mathematical proofs
 │   ├── BENCHMARK_RESULTS.md         # Comprehensive empirical test report
 │   ├── DEPLOYMENT_GUIDE.md          # Multi-cloud production deployment & operations runbook
+│   ├── INTERVIEW_GUIDE.md           # FAANG/Staff-level system design interview defense guide
 │   └── TROUBLESHOOTING.md           # SRE / MLOps operational runbook
 ├── docker-compose.yaml              # Single-command local full-stack environment
 ├── .github/workflows/ci.yaml        # Automated GitHub Actions CI/CD pipeline
